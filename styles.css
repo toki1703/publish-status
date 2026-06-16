@@ -1,0 +1,23 @@
+/* VSCode Git スタイルの Publish ステータスインジケーター */
+
+.publish-status-letter {
+	font-size: 11px;
+	font-weight: 600;
+	margin-left: auto;
+	padding-left: 6px;
+	flex-shrink: 0;
+}
+
+/* A: Added — 新規ステージ済み */
+.publish-status-added    { color: #73c991; }
+
+/* M: Modified — 変更ステージ済み */
+.publish-status-modified { color: #e2c08d; }
+
+/* D: Deleted — ローカル削除 */
+.publish-status-deleted  { color: #f14c4c; }
+
+/* ファイル名テキストへの色反映 */
+.tree-item-inner.publish-status-added    { color: #73c991; }
+.tree-item-inner.publish-status-modified { color: #e2c08d; }
+.tree-item-inner.publish-status-deleted  { color: #f14c4c; }
