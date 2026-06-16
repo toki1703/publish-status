@@ -30,6 +30,14 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		this.app.workspace.onLayoutReady(async () => {
 			await this.refresh();
 		});
+
+		this.registerEvent(
+			this.app.workspace.on('active-leaf-change', () => this.refresh())
+		);
+
+		this.registerEvent(
+			this.app.vault.on('modify', () => this.refresh())
+		);
 	}
 
 	onunload() {
