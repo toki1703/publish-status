@@ -3,7 +3,7 @@
 	"name": "Publish Status",
 	"version": "1.0.0",
 	"minAppVersion": "1.12.0",
-	"description": "Show Obsidian Publish Status in File Explorer",
+	"description": "Show Publish Status in File Explorer",
 	"author": "ときくん",
 	"authorUrl": "https://github.com/toki1703",
 	"isDesktopOnly": false
