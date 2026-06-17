@@ -17,6 +17,20 @@ function resolveStatus(item) {
 	return null;
 }
 
+// Publish Explorer 用: Publish 上に存在するすべてのファイルのステータスを返す
+function resolvePublishStatus(item) {
+	if (item.type === 'deleted') {
+		return { letter: 'D', colorCls: 'publish-status-deleted' };
+	}
+	if (item.ctime > 0) {
+		if (item.checked) {
+			return { letter: 'M', colorCls: 'publish-status-modified' };
+		}
+		return { letter: null, colorCls: 'publish-status-clean' }; // 変更なし
+	}
+	return null; // ctime === 0 かつ非削除 → まだ Publish 未反映 (A)
+}
+
 function buildTree(entries) {
 	const root = { children: {}, files: [] };
 	for (const entry of entries) {
@@ -67,50 +81,53 @@ class PublishExplorerView extends obsidian.ItemView {
 
 		const content = container.createDiv({ cls: 'publish-explorer-content' });
 
-		const statusMap = this.plugin.statusMap;
-		if (statusMap.size === 0) {
-			content.createDiv({ cls: 'publish-explorer-empty', text: '変更なし' });
+		const publishMap = this.plugin.publishMap;
+		if (publishMap.size === 0) {
+			content.createDiv({ cls: 'publish-explorer-empty', text: 'Publish 上にファイルがありません' });
 			return;
 		}
 
 		const deletedEntries = [];
-		const otherEntries = [];
-		for (const [path, status] of statusMap) {
+		const modifiedEntries = [];
+		const cleanEntries = [];
+
+		for (const [path, status] of publishMap) {
+			const entry = { path, status };
 			if (status.letter === 'D') {
-				deletedEntries.push({ path, status });
+				deletedEntries.push(entry);
+			} else if (status.letter === 'M') {
+				modifiedEntries.push(entry);
 			} else {
-				otherEntries.push({ path, status });
+				cleanEntries.push(entry);
 			}
 		}
-		deletedEntries.sort((a, b) => a.path.localeCompare(b.path));
-		otherEntries.sort((a, b) => a.path.localeCompare(b.path));
+
+		const sort = arr => arr.sort((a, b) => a.path.localeCompare(b.path));
+		sort(deletedEntries);
+		sort(modifiedEntries);
+		sort(cleanEntries);
 
 		if (deletedEntries.length > 0) {
-			this.renderSection(
-				content,
-				`Publish のみ (D)   ${deletedEntries.length}`,
-				deletedEntries
-			);
+			this.renderSection(content, `Publish のみ (D)   ${deletedEntries.length}`, deletedEntries);
 		}
-
-		if (otherEntries.length > 0) {
-			this.renderSection(
-				content,
-				`変更予定 (A/M)   ${otherEntries.length}`,
-				otherEntries
-			);
+		if (modifiedEntries.length > 0) {
+			this.renderSection(content, `変更あり (M)   ${modifiedEntries.length}`, modifiedEntries);
+		}
+		if (cleanEntries.length > 0) {
+			this.renderSection(content, `変更なし   ${cleanEntries.length}`, cleanEntries);
 		}
 	}
 
-	renderSection(container, title, entries) {
+	renderSection(container, title, entries, startCollapsed = false) {
 		const section = container.createDiv({ cls: 'publish-explorer-section' });
 
 		const sectionHeader = section.createDiv({ cls: 'publish-explorer-section-header' });
 		const chevron = sectionHeader.createSpan({ cls: 'publish-explorer-chevron' });
-		obsidian.setIcon(chevron, 'chevron-down');
+		obsidian.setIcon(chevron, startCollapsed ? 'chevron-right' : 'chevron-down');
 		sectionHeader.createSpan({ cls: 'publish-explorer-section-title', text: title });
 
 		const sectionContent = section.createDiv({ cls: 'publish-explorer-section-content' });
+		if (startCollapsed) sectionContent.addClass('is-collapsed');
 		this.renderTree(sectionContent, buildTree(entries), 0);
 
 		sectionHeader.addEventListener('click', () => {
@@ -188,6 +205,7 @@ class PublishExplorerView extends obsidian.ItemView {
 class PublishStatusPlugin extends obsidian.Plugin {
 	async onload() {
 		this.statusMap = new Map();
+		this.publishMap = new Map();
 
 		this.registerView(
 			VIEW_TYPE_PUBLISH_EXPLORER,
@@ -249,9 +267,13 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		try {
 			const changes = await inst.scanForChanges();
 			this.statusMap.clear();
+			this.publishMap.clear();
 			for (const item of changes) {
 				const status = resolveStatus(item);
 				if (status) this.statusMap.set(item.path, status);
+
+				const publishStatus = resolvePublishStatus(item);
+				if (publishStatus) this.publishMap.set(item.path, publishStatus);
 			}
 			console.log('[PublishStatus] statusMap:', this.statusMap.size, 'entries');
 			this.decorate();

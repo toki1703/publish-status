@@ -17,6 +17,9 @@
 /* D: Deleted — ローカル削除 */
 .publish-status-deleted  { color: #f14c4c; }
 
+/* clean: Publish 済み・変更なし */
+.publish-status-clean    { color: var(--text-muted); }
+
 /* ファイル名テキストへの色反映 */
 .tree-item-inner.publish-status-added    { color: #73c991; }
 .tree-item-inner.publish-status-modified { color: #e2c08d; }
