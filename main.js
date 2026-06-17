@@ -139,11 +139,11 @@ async function fetchPublishContent(inst, path, options = {}) {
 				return null;
 			}
 
-			// 判定2: 本文が "## Not Found" のテンプレートかどうか（ETag仕様変更への保険）
-			const text = (res.text ?? '').trim();
-			if (text.startsWith('## Not Found') && text.includes('does not exist.')) {
-				return null;
-			}
+			// // 判定2: 本文が "## Not Found" のテンプレートかどうか（ETag仕様変更への保険）
+			// const text = (res.text ?? '').trim();
+			// if (text.startsWith('## Not Found') && text.includes('does not exist.')) {
+			// 	return null;
+			// }
 
 			// どちらにも引っかからなければ、正規のコンテンツとして返す
 			return res.text;
