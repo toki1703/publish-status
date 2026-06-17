@@ -132,6 +132,9 @@ class PublishDiffView extends obsidian.ItemView {
 		this.plugin = plugin;
 		this.filePath = null;
 		this.statusLetter = null;
+		this.publishContent = null;
+		this.bodyEl = null;
+		this._rerenderTimer = null;
 	}
 
 	getViewType() { return VIEW_TYPE_PUBLISH_DIFF; }
@@ -158,9 +161,18 @@ class PublishDiffView extends obsidian.ItemView {
 		if (!this.filePath) {
 			c.createDiv({ cls: 'publish-diff-empty', text: 'ファイルを選択してください' });
 		}
+
+		// ローカルファイルの変更をリアルタイムに反映
+		this.registerEvent(this.app.vault.on('modify', (file) => {
+			if (file.path !== this.filePath || this.publishContent === null) return;
+			clearTimeout(this._rerenderTimer);
+			this._rerenderTimer = setTimeout(() => this._rerenderDiff(), 300);
+		}));
 	}
 
-	async onClose() {}
+	async onClose() {
+		clearTimeout(this._rerenderTimer);
+	}
 
 	async loadAndRender() {
 		const c = this.containerEl.children[1];
@@ -169,80 +181,67 @@ class PublishDiffView extends obsidian.ItemView {
 
 		const { filePath, statusLetter } = this;
 
-		// ヘッダー
 		const header = c.createDiv({ cls: 'publish-diff-header' });
 		const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
 		header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
 		header.createSpan({ cls: 'publish-diff-filepath', text: filePath });
 
-		const split = c.createDiv({ cls: 'publish-diff-split' });
-
-		// ロード中メッセージ
-		const loadingEl = split.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
+		this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
+		const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
 
 		const inst = this.plugin.app.internalPlugins?.plugins?.['publish']?.instance;
+		this.publishContent = inst ? await fetchPublishContent(inst, filePath) : null;
 
-		// ローカル版
 		let localContent = null;
 		if (statusLetter !== 'D') {
 			const vaultFile = this.app.vault.getFileByPath(filePath);
 			if (vaultFile) localContent = await this.app.vault.read(vaultFile);
 		}
 
-		// Publish 版
-		let publishContent = null;
-		if (inst) publishContent = await fetchPublishContent(inst, filePath);
-
 		loadingEl.remove();
+		this._renderDiff(localContent);
+	}
+
+	_renderDiff(localContent) {
+		if (!this.bodyEl) return;
+		this.bodyEl.empty();
+		const { statusLetter } = this;
 
 		if (statusLetter === 'D') {
-			if (publishContent !== null) {
-				this.renderSideBySide(split, publishContent, null);
+			if (this.publishContent !== null) {
+				this.renderUnified(this.bodyEl, this.publishContent, null);
 			} else {
-				this.renderMessage(split, 'Publish 版のコンテンツを取得できませんでした');
+				this.renderMessage(this.bodyEl, 'Publish 版のコンテンツを取得できませんでした');
 			}
-		} else if (publishContent !== null && localContent !== null) {
-			this.renderSideBySide(split, publishContent, localContent);
+			return;
+		}
+
+		if (this.publishContent !== null && localContent !== null) {
+			this.renderUnified(this.bodyEl, this.publishContent, localContent);
 		} else if (localContent !== null) {
-			this.renderMessage(split, 'Publish 版を取得できませんでした — ローカル版を表示', 'warn');
-			this.renderSideBySide(split, localContent, localContent);
+			this.renderMessage(this.bodyEl, 'Publish 版を取得できませんでした — ローカル版を表示', 'warn');
+			this.renderUnified(this.bodyEl, localContent, localContent);
 		} else {
-			this.renderMessage(split, 'コンテンツを取得できませんでした');
+			this.renderMessage(this.bodyEl, 'コンテンツを取得できませんでした');
 		}
 	}
 
-	renderSideBySide(container, publishContent, localContent) {
+	async _rerenderDiff() {
+		if (!this.bodyEl || !this.filePath || this.statusLetter === 'D') return;
+		const vaultFile = this.app.vault.getFileByPath(this.filePath);
+		if (!vaultFile) return;
+		const localContent = await this.app.vault.read(vaultFile);
+		this._renderDiff(localContent);
+	}
+
+	renderUnified(container, publishContent, localContent) {
 		const publishLines = publishContent ? publishContent.split('\n') : [];
-		const localLines  = localContent  ? localContent.split('\n')  : [];
-
-		const leftPane  = container.createDiv({ cls: 'publish-diff-pane' });
-		const rightPane = container.createDiv({ cls: 'publish-diff-pane' });
-
-		leftPane.createDiv({ cls: 'publish-diff-pane-header publish-diff-del', text: '− Publish版' });
-		rightPane.createDiv({ cls: 'publish-diff-pane-header publish-diff-add', text: '+ Local版' });
-
-		const leftContent  = leftPane.createDiv({ cls: 'publish-diff-pane-content' });
-		const rightContent = rightPane.createDiv({ cls: 'publish-diff-pane-content' });
-
-		// 垂直スクロール同期
-		let syncing = false;
-		leftContent.addEventListener('scroll', () => {
-			if (syncing) return; syncing = true;
-			rightContent.scrollTop = leftContent.scrollTop;
-			syncing = false;
-		});
-		rightContent.addEventListener('scroll', () => {
-			if (syncing) return; syncing = true;
-			leftContent.scrollTop = rightContent.scrollTop;
-			syncing = false;
-		});
+		const localLines   = localContent   ? localContent.split('\n')   : [];
 
 		if (localContent === null) {
-			// D ステータス: 左に全行削除として表示
 			let pn = 1;
 			for (const line of publishLines) {
-				this.renderSideRow(leftContent,  'delete', pn++, line);
-				this.renderSideRow(rightContent, 'blank',  null, '');
+				this.renderRow(container, 'delete', pn++, null, line);
 			}
 			return;
 		}
@@ -250,41 +249,29 @@ class PublishDiffView extends obsidian.ItemView {
 		const diff  = computeDiff(publishLines, localLines);
 		const hunks = groupHunks(diff);
 
-		let pn = 1, ln = 1, i = 0;
-		while (i < hunks.length) {
-			const hunk = hunks[i];
-			if (hunk.type === 'equal') {
-				for (const text of hunk.lines) {
-					this.renderSideRow(leftContent,  'equal', pn++, text);
-					this.renderSideRow(rightContent, 'equal', ln++, text);
+		let pn = 1, ln = 1;
+		for (const hunk of hunks) {
+			for (const text of hunk.lines) {
+				if (hunk.type === 'equal') {
+					this.renderRow(container, 'equal', pn++, ln++, text);
+				} else if (hunk.type === 'delete') {
+					this.renderRow(container, 'delete', pn++, null, text);
+				} else {
+					this.renderRow(container, 'insert', null, ln++, text);
 				}
-				i++;
-			} else if (hunk.type === 'delete') {
-				const next     = hunks[i + 1];
-				const delLines = hunk.lines;
-				const insLines = next?.type === 'insert' ? next.lines : [];
-				const maxLen   = Math.max(delLines.length, insLines.length);
-				for (let k = 0; k < maxLen; k++) {
-					if (k < delLines.length) this.renderSideRow(leftContent,  'delete', pn++, delLines[k]);
-					else                     this.renderSideRow(leftContent,  'blank',  null, '');
-					if (k < insLines.length) this.renderSideRow(rightContent, 'insert', ln++, insLines[k]);
-					else                     this.renderSideRow(rightContent, 'blank',  null, '');
-				}
-				i += insLines.length > 0 ? 2 : 1;
-			} else { // insert
-				for (const text of hunk.lines) {
-					this.renderSideRow(leftContent,  'blank',  null, '');
-					this.renderSideRow(rightContent, 'insert', ln++, text);
-				}
-				i++;
 			}
 		}
 	}
 
-	renderSideRow(container, type, lineNum, text) {
-		const row = container.createDiv({ cls: `publish-diff-side-row publish-diff-side-row-${type}` });
-		row.createSpan({ cls: 'publish-diff-num', text: lineNum != null ? String(lineNum) : '' });
-		row.createSpan({ cls: 'publish-diff-side-text', text });
+	renderRow(container, type, pn, ln, text) {
+		const row = container.createDiv({ cls: `publish-diff-row publish-diff-row-${type}` });
+		row.createSpan({ cls: 'publish-diff-num', text: pn != null ? String(pn) : '' });
+		row.createSpan({ cls: 'publish-diff-num', text: ln != null ? String(ln) : '' });
+		row.createSpan({
+			cls: 'publish-diff-marker',
+			text: type === 'delete' ? '−' : type === 'insert' ? '+' : ' ',
+		});
+		row.createSpan({ cls: 'publish-diff-text', text });
 	}
 
 	renderMessage(container, text, level = 'error') {
