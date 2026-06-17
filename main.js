@@ -133,13 +133,19 @@ class PublishDiffView extends obsidian.ItemView {
 		this.filePath = null;
 		this.statusLetter = null;
 		this.publishContent = null;
+		this.publishHash = null;
+		this.localHash = null;
 		this.bodyEl = null;
 		this._rerenderTimer = null;
 	}
 
 	getViewType() { return VIEW_TYPE_PUBLISH_DIFF; }
 	getDisplayText() {
-		return this.filePath ? this.filePath.split('/').pop() : 'Publish Diff';
+		if (!this.filePath) return 'Publish Diff';
+		const name = this.filePath.split('/').pop();
+		const p = this.publishHash ?? '-------';
+		const l = this.localHash   ?? '-------';
+		return `${name} (${p}) ↔ ${name} (${l})`;
 	}
 	getIcon() { return 'git-compare'; }
 
@@ -198,8 +204,12 @@ class PublishDiffView extends obsidian.ItemView {
 			if (vaultFile) localContent = await this.app.vault.read(vaultFile);
 		}
 
+		this.publishHash = await this._contentHash(this.publishContent);
+		this.localHash   = await this._contentHash(localContent);
+
 		loadingEl.remove();
 		this._renderDiff(localContent);
+		this.app.workspace.trigger('layout-change');
 	}
 
 	_renderDiff(localContent) {
@@ -231,7 +241,15 @@ class PublishDiffView extends obsidian.ItemView {
 		const vaultFile = this.app.vault.getFileByPath(this.filePath);
 		if (!vaultFile) return;
 		const localContent = await this.app.vault.read(vaultFile);
+		this.localHash = await this._contentHash(localContent);
 		this._renderDiff(localContent);
+		this.app.workspace.trigger('layout-change');
+	}
+
+	async _contentHash(content) {
+		if (!content) return null;
+		const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(content));
+		return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 7);
 	}
 
 	renderUnified(container, publishContent, localContent) {
