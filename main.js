@@ -152,6 +152,15 @@ function getPublishToken() {
 	}
 }
 
+function readResponseJson(res) {
+	if (res.json) return res.json;
+	try {
+		return JSON.parse(res.text ?? '{}');
+	} catch (_) {
+		return {};
+	}
+}
+
 async function sha256Hex(content) {
 	const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
 	return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -207,6 +216,88 @@ async function removePublishFile(inst, path) {
 		throw new Error(`Remove failed with status ${res.status}`);
 	}
 	return res;
+}
+
+async function fetchPublishDefaultBaseUrl(inst) {
+	const siteId = inst?.siteId;
+	const token = getPublishToken();
+	if (!siteId) throw new Error('Publish site information is missing');
+	if (!token) throw new Error('Obsidian account token is missing');
+
+	const res = await obsidian.requestUrl({
+		url: 'https://publish.obsidian.md/api/slugs',
+		method: 'POST',
+		headers: {
+			'content-type': 'application/json',
+		},
+		body: JSON.stringify({
+			ids: [siteId],
+			token,
+		}),
+	});
+
+	if (res.status < 200 || res.status >= 300) {
+		throw new Error(`Slug request failed with status ${res.status}`);
+	}
+
+	const slug = readResponseJson(res)?.[siteId];
+	if (!slug) throw new Error('Publish slug is missing');
+	return `https://publish.obsidian.md/${slug}`;
+}
+
+async function fetchPublishCustomBaseUrl(inst) {
+	const host = inst?.host;
+	const siteId = inst?.siteId;
+	const token = getPublishToken();
+	if (!host || !siteId) throw new Error('Publish site information is missing');
+	if (!token) throw new Error('Obsidian account token is missing');
+
+	const res = await obsidian.requestUrl({
+		url: 'https://publish.obsidian.md/api/customurl',
+		method: 'POST',
+		headers: {
+			'content-type': 'application/json',
+		},
+		body: JSON.stringify({
+			id: siteId,
+			host,
+			token,
+		}),
+	});
+
+	if (res.status < 200 || res.status >= 300) return null;
+	const data = readResponseJson(res);
+	if (!data?.redirect || !data?.url) return null;
+	return data.url.match(/^https?:\/\//) ? data.url : `https://${data.url}`;
+}
+
+async function fetchPublishBaseUrl(inst) {
+	let customUrl = null;
+	try {
+		customUrl = await fetchPublishCustomBaseUrl(inst);
+	} catch (e) {
+		console.warn('[PublishStatus] custom URL lookup failed', e);
+	}
+	return customUrl ?? await fetchPublishDefaultBaseUrl(inst);
+}
+
+function getPublishPathFromPermalink(app, path) {
+	const file = app.vault.getFileByPath(path);
+	const permalink = file
+		? app.metadataCache.getFileCache(file)?.frontmatter?.permalink
+		: null;
+	const publishPath = typeof permalink === 'string' && permalink.trim()
+		? permalink.trim()
+		: path.replace(/\.md$/i, '');
+	return publishPath.replace(/^\/+/, '');
+}
+
+function buildPublishUrl(baseUrl, publishPath) {
+	const cleanBase = baseUrl.replace(/\/+$/, '');
+	const cleanPath = publishPath.replace(/^\/+/, '');
+	if (!cleanPath) return cleanBase;
+	const encodedPath = cleanPath.split('/').map(encodeURIComponent).join('/');
+	return `${cleanBase}/${encodedPath}`;
 }
 
 function getPublishAction(statusLetter) {
@@ -614,6 +705,17 @@ class PublishExplorerView extends obsidian.ItemView {
 							}
 						});
 				});
+				if (file.status.letter !== 'A') {
+					menu.addSeparator();
+					menu.addItem((item) => {
+						item
+							.setTitle('リモートのリンクをコピーする')
+							.setIcon('link')
+							.onClick(async () => {
+								await this.plugin.copyRemoteLink(file.path);
+							});
+					});
+				}
 				menu.showAtMouseEvent(event);
 			});
 		}
@@ -788,6 +890,27 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		} catch (e) {
 			console.error('[PublishStatus] remove failed', e);
 			new obsidian.Notice(`リモート削除に失敗しました: ${e?.message ?? e}`);
+			return false;
+		}
+	}
+
+	async copyRemoteLink(path) {
+		const inst = getPublishInstance(this.app);
+		if (!inst) {
+			new obsidian.Notice('Publish plugin が無効です');
+			return false;
+		}
+
+		try {
+			const baseUrl = await fetchPublishBaseUrl(inst);
+			const publishPath = getPublishPathFromPermalink(this.app, path);
+			const url = buildPublishUrl(baseUrl, publishPath);
+			await navigator.clipboard.writeText(url);
+			new obsidian.Notice(`リモートのリンクをコピーしました: ${url}`);
+			return true;
+		} catch (e) {
+			console.error('[PublishStatus] copy remote link failed', e);
+			new obsidian.Notice(`リモートのリンクコピーに失敗しました: ${e?.message ?? e}`);
 			return false;
 		}
 	}
