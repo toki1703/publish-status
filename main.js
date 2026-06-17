@@ -300,6 +300,14 @@ function buildPublishUrl(baseUrl, publishPath) {
 	return `${cleanBase}/${encodedPath}`;
 }
 
+function addMenuSectionHeader(menu, title) {
+	menu.addItem((item) => {
+		item
+			.setTitle(title)
+			.setDisabled(true);
+	});
+}
+
 function getPublishAction(statusLetter) {
 	if (statusLetter === 'D') {
 		return { title: 'リモートを削除する', icon: 'trash-2', kind: 'remove' };
@@ -693,6 +701,19 @@ class PublishExplorerView extends obsidian.ItemView {
 
 				event.preventDefault();
 				const menu = new obsidian.Menu();
+
+				addMenuSectionHeader(menu, 'ローカル');
+				menu.addItem((item) => {
+					item
+						.setTitle('差分を表示する')
+						.setIcon('git-compare')
+						.onClick(() => {
+							this.plugin.openDiff(file.path, file.status);
+						});
+				});
+
+				menu.addSeparator();
+				addMenuSectionHeader(menu, 'リモート');
 				menu.addItem((item) => {
 					item
 						.setTitle(action.title)
@@ -706,7 +727,6 @@ class PublishExplorerView extends obsidian.ItemView {
 						});
 				});
 				if (file.status.letter !== 'A') {
-					menu.addSeparator();
 					menu.addItem((item) => {
 						item
 							.setTitle('リモートのリンクをコピーする')
