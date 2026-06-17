@@ -127,7 +127,11 @@ async function fetchPublishContent(inst, path, permalink = null) {
 			});
 			const data = await res.json();
 			console.log('[PublishDiff] customurl response:', data);
-			inst._diffBaseUrl = (data.url ?? '').replace(/\/+$/, '');
+			const rawUrl = data.url ?? '';
+			const withScheme = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+			// ホスト部分のみ取り出す (data.url がパスを含む場合に備えて)
+			const parsed = new URL(withScheme);
+			inst._diffBaseUrl = parsed.origin;
 			console.log('[PublishDiff] baseUrl:', inst._diffBaseUrl);
 		} catch (e) {
 			console.warn('[PublishDiff] customurl 取得失敗:', e);
