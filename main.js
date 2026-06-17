@@ -70,7 +70,6 @@ function computeDiff(oldLines, newLines) {
 	const m = oldLines.length;
 	const n = newLines.length;
 
-	// 巨大ファイルは単純な全置換で返す
 	if (m * n > 600000) {
 		return [
 			...oldLines.map(text => ({ type: 'delete', text })),
@@ -393,7 +392,6 @@ class PublishDiffView extends obsidian.ItemView {
 			c.createDiv({ cls: 'publish-diff-empty', text: 'ファイルを選択してください' });
 		}
 
-		// ローカルファイルの変更をリアルタイムに反映
 		this.registerEvent(this.app.vault.on('modify', (file) => {
 			if (file.path !== this.filePath || this.publishContent === null) return;
 			clearTimeout(this._rerenderTimer);
@@ -405,7 +403,8 @@ class PublishDiffView extends obsidian.ItemView {
 		clearTimeout(this._rerenderTimer);
 	}
 
-    async loadAndRender() {
+	// ── [修正] cacheBust オプションを追加 ──────────────────────
+    async loadAndRender(options = {}) {
         const renderToken = ++this._renderToken;
         const c = this.containerEl.children[1];
         c.empty();
@@ -429,7 +428,6 @@ class PublishDiffView extends obsidian.ItemView {
 				if (!this.filePath) return;
 				uploadBtn.disabled = true;
 				try {
-					// プラグイン側の共通処理を呼び出す（スピナーや待機はあちらで一元管理されます）
 					await this.plugin.publishFileByPath(this.filePath);
 				} finally {
 					uploadBtn.disabled = false;
@@ -441,7 +439,10 @@ class PublishDiffView extends obsidian.ItemView {
         const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
 
         const inst = getPublishInstance(this.plugin.app);
-        this.publishContent = inst ? await fetchPublishContent(inst, filePath) : null;
+		// [修正] cacheBust オプションをそのまま渡す
+        this.publishContent = inst
+			? await fetchPublishContent(inst, filePath, { cacheBust: !!options.cacheBust })
+			: null;
         if (renderToken !== this._renderToken) return;
 
         let localContent = null;
@@ -468,13 +469,11 @@ class PublishDiffView extends obsidian.ItemView {
 	_forceTabTitleUpdate() {
 		this.viewTitle = this._buildTitle();
 
-		// 方法1: tabHeaderInnerTitleEl への直接書き込み（最優先）
 		const titleEl = this.leaf.tabHeaderInnerTitleEl;
 		if (titleEl) {
 			titleEl.textContent = this.viewTitle;
 		}
 
-		// 方法2: view-header-title への直接書き込み
 		const headerTitleEl = this.containerEl
 			.closest('.workspace-leaf')
 			?.querySelector('.view-header-title');
@@ -482,13 +481,14 @@ class PublishDiffView extends obsidian.ItemView {
 			headerTitleEl.textContent = this.viewTitle;
 		}
 
-		// 方法3: workspace に通知
 		this.app.workspace.trigger('layout-change');
 	}
 
-	// 外部からスピナー表示を強制するメソッド
+	// ── [修正] showLoadingSpinner で _renderToken をインクリメント ──
 	showLoadingSpinner() {
 		if (!this.bodyEl) return;
+		// renderToken を進めることで、進行中の loadAndRender があれば無効化する
+		this._renderToken++;
 		this.bodyEl.empty();
 		const wrap = this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' });
 		wrap.createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
@@ -673,7 +673,6 @@ class PublishExplorerView extends obsidian.ItemView {
 				});
 			}
 
-			// すべてのファイルで Diff パネルを開く
 			fileRow.addEventListener('click', () => {
 				this.plugin.openDiff(file.path, file.status);
 			});
@@ -876,27 +875,24 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			return false;
 		}
 
-		// エクスプローラー側のツリーをスピナー状態にする
+		// エクスプローラー側スピナー開始
 		this.uploadingPaths.add(file.path);
 		this._reRenderExplorer();
 
-		// 【追加】もしこのファイルが現在Diff画面で開かれていれば、Diff画面もスピナー状態にする
-		this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF).forEach(leaf => {
-			if (leaf.view.filePath === file.path && typeof leaf.view.showLoadingSpinner === 'function') {
-				leaf.view.showLoadingSpinner();
-			}
-		});
+		// [修正] showLoadingSpinner は _renderToken をインクリメントするので
+		// 後続の loadAndRender(cacheBust) がきちんと上書きできる
+		this._getDiffViewForPath(file.path)?.showLoadingSpinner();
 
+		let uploadedHash = null;
 		try {
 			const content = await this.app.vault.read(file);
 			const hash = await sha256Hex(content);
 			await uploadPublishMarkdown(inst, file.path, content, hash);
+			uploadedHash = hash;
 
-			// 【条件1】ハッシュが一致するまでループ待機（15秒制限、0.8秒間隔）
 			await this.waitForPublishedContent(file.path, hash);
-
-			// 【条件2】ハッシュ一致後、さらに0.5秒待機
-			await sleep(500);
+			// waitForPublishedContent がキャッシュバスト付きで確認済みなので
+			// ここでは sleep なしでよい（必要なら残しても可）
 
 			new obsidian.Notice(`公開しました: ${file.path}`);
 			await this.refresh();
@@ -906,32 +902,40 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
 			return false;
 		} finally {
-			// エクスプローラー側のスピナー解除
+			// エクスプローラー側スピナー解除
 			this.uploadingPaths.delete(file.path);
 			this._reRenderExplorer();
 
-			// 【追加】成否に関わらず、最後にDiff画面を確実にリロード（リロードされるまでスピナーが維持されます）
-			this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF).forEach(leaf => {
-				if (leaf.view.filePath === file.path && typeof leaf.view.loadAndRender === 'function') {
-					void leaf.view.loadAndRender();
-				}
-			});
+			// [修正] 成功時はキャッシュバスト付きで再描画（古いコンテンツを掴まない）
+			//        失敗時も同様に再描画してスピナーを解除する
+			const diffView = this._getDiffViewForPath(file.path);
+			if (diffView) {
+				void diffView.loadAndRender({ cacheBust: uploadedHash !== null });
+			}
 		}
 	}
 	
+	// [追加] 対象パスの DiffView を取得するヘルパー
+	_getDiffViewForPath(path) {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF)) {
+			if (leaf.view.filePath === path) return leaf.view;
+		}
+		return null;
+	}
+
 	async waitForPublishedContent(path, expectedHash) {
 		const inst = getPublishInstance(this.app);
 		if (!inst || !expectedHash) return false;
 
-		const timeoutMs = 15000; // 最大15秒
-		const intervalMs = 800;  // 0.8秒間隔
+		const timeoutMs = 15000;
+		const intervalMs = 800;
 		const startTime = Date.now();
 
 		while (Date.now() - startTime <= timeoutMs) {
 			await sleep(intervalMs);
 			const publishContent = await fetchPublishContent(inst, path, { cacheBust: true });
 			if (publishContent !== null && (await sha256Hex(publishContent)) === expectedHash) {
-				return true; // 一致したらループを抜ける
+				return true;
 			}
 		}
 
