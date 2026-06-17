@@ -53,6 +53,17 @@ function buildTree(entries) {
 	return root;
 }
 
+function buildPublishExplorerEntries(publishMap, statusMap) {
+	const entryMap = new Map(publishMap);
+	for (const [path, status] of statusMap) {
+		if (status.letter === 'A' && !entryMap.has(path)) {
+			entryMap.set(path, status);
+		}
+	}
+	return Array.from(entryMap, ([path, status]) => ({ path, status }))
+		.sort((a, b) => a.path.localeCompare(b.path));
+}
+
 // ── diff アルゴリズム (LCS) ───────────────────────────────────
 
 function computeDiff(oldLines, newLines) {
@@ -170,6 +181,45 @@ async function uploadPublishMarkdown(inst, path, content, hash) {
 		throw new Error(`Upload failed with status ${res.status}`);
 	}
 	return res;
+}
+
+async function removePublishFile(inst, path) {
+	const host = inst?.host;
+	const siteId = inst?.siteId;
+	const token = getPublishToken();
+	if (!host || !siteId) throw new Error('Publish site information is missing');
+	if (!token) throw new Error('Obsidian account token is missing');
+
+	const res = await obsidian.requestUrl({
+		url: `https://${host}/api/remove`,
+		method: 'POST',
+		headers: {
+			'content-type': 'application/json',
+		},
+		body: JSON.stringify({
+			path,
+			id: siteId,
+			token,
+		}),
+	});
+
+	if (res.status < 200 || res.status >= 300) {
+		throw new Error(`Remove failed with status ${res.status}`);
+	}
+	return res;
+}
+
+function getPublishAction(statusLetter) {
+	if (statusLetter === 'D') {
+		return { title: 'リモートを削除する', icon: 'trash-2', kind: 'remove' };
+	}
+	if (statusLetter === 'A') {
+		return { title: 'リモートに追加する', icon: 'upload-cloud', kind: 'publish' };
+	}
+	if (statusLetter === 'M') {
+		return { title: 'リモートに反映する', icon: 'refresh-cw', kind: 'publish' };
+	}
+	return { title: 'ページを削除する', icon: 'trash-2', kind: 'remove' };
 }
 
 // ── Publish Diff View ─────────────────────────────────────────
@@ -359,7 +409,10 @@ class PublishDiffView extends obsidian.ItemView {
 			return;
 		}
 
-		if (this.publishContent !== null && localContent !== null) {
+		if (statusLetter === 'A' && localContent !== null && this.publishContent === null) {
+			this.renderMessage(this.bodyEl, 'Publish に追加予定のローカル版を表示', 'warn');
+			this.renderUnified(this.bodyEl, '', localContent);
+		} else if (this.publishContent !== null && localContent !== null) {
 			this.renderUnified(this.bodyEl, this.publishContent, localContent);
 		} else if (localContent !== null) {
 			this.renderMessage(this.bodyEl, 'Publish 版を取得できませんでした — ローカル版を表示', 'warn');
@@ -482,14 +535,11 @@ class PublishExplorerView extends obsidian.ItemView {
 
 		const content = container.createDiv({ cls: 'publish-explorer-content' });
 
-		const publishMap = this.plugin.publishMap;
-		if (publishMap.size === 0) {
+		const entries = buildPublishExplorerEntries(this.plugin.publishMap, this.plugin.statusMap);
+		if (entries.length === 0) {
 			content.createDiv({ cls: 'publish-explorer-empty', text: 'Publish 上にファイルがありません' });
 			return;
 		}
-
-		const entries = Array.from(publishMap, ([path, status]) => ({ path, status }))
-			.sort((a, b) => a.path.localeCompare(b.path));
 
 		this.renderTree(content, buildTree(entries), 0);
 	}
@@ -544,6 +594,27 @@ class PublishExplorerView extends obsidian.ItemView {
 			// すべてのファイルで Diff パネルを開く
 			fileRow.addEventListener('click', () => {
 				this.plugin.openDiff(file.path, file.status);
+			});
+
+			fileRow.addEventListener('contextmenu', (event) => {
+				const action = getPublishAction(file.status.letter);
+				if (!action) return;
+
+				event.preventDefault();
+				const menu = new obsidian.Menu();
+				menu.addItem((item) => {
+					item
+						.setTitle(action.title)
+						.setIcon(action.icon)
+						.onClick(async () => {
+							if (action.kind === 'remove') {
+								await this.plugin.removeRemoteFile(file.path);
+							} else {
+								await this.plugin.publishFileByPath(file.path);
+							}
+						});
+				});
+				menu.showAtMouseEvent(event);
 			});
 		}
 	}
@@ -698,6 +769,25 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		} catch (e) {
 			console.error('[PublishStatus] upload failed', e);
 			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
+			return false;
+		}
+	}
+
+	async removeRemoteFile(path) {
+		const inst = getPublishInstance(this.app);
+		if (!inst) {
+			new obsidian.Notice('Publish plugin が無効です');
+			return false;
+		}
+
+		try {
+			await removePublishFile(inst, path);
+			new obsidian.Notice(`リモートを削除しました: ${path}`);
+			await this.refresh();
+			return true;
+		} catch (e) {
+			console.error('[PublishStatus] remove failed', e);
+			new obsidian.Notice(`リモート削除に失敗しました: ${e?.message ?? e}`);
 			return false;
 		}
 	}
