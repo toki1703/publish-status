@@ -142,8 +142,7 @@ class PublishDiffView extends obsidian.ItemView {
 
 	getViewType() { return VIEW_TYPE_PUBLISH_DIFF; }
 	getDisplayText() {
-		if (!this.filePath) return 'Publish Diff';
-		const name = this.filePath.split('/').pop();
+		const name = this.filePath?.split('/').pop() ?? 'Publish Diff';
 		const p = this.publishHash ?? '-------';
 		const l = this.localHash   ?? '-------';
 		return `${name} (${p}) ↔ ${name} (${l})`;
@@ -188,11 +187,16 @@ class PublishDiffView extends obsidian.ItemView {
 
 		const { filePath, statusLetter } = this;
 
+		// ファイル切り替え時に前のハッシュをリセット
+		this.publishHash = null;
+		this.localHash   = null;
+
 		const header = c.createDiv({ cls: 'publish-diff-header' });
 		const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
 		header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
 		this.headerTitleEl = header.createSpan({ cls: 'publish-diff-title' });
 		this._updateHeaderTitle();
+		this._forceTabTitleUpdate();
 
 		this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
 		const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
@@ -212,7 +216,7 @@ class PublishDiffView extends obsidian.ItemView {
 		loadingEl.remove();
 		this._renderDiff(localContent);
 		this._updateHeaderTitle();
-		this.app.workspace.trigger('layout-change');
+		this._forceTabTitleUpdate();
 	}
 
 	_updateHeaderTitle() {
@@ -221,6 +225,11 @@ class PublishDiffView extends obsidian.ItemView {
 		const p = this.publishHash ?? '-------';
 		const l = this.localHash   ?? '-------';
 		this.headerTitleEl.setText(`${name} (${p}) ↔ ${name} (${l})`);
+	}
+
+	_forceTabTitleUpdate() {
+		this.leaf.updateHeader?.();
+		this.app.workspace.trigger('layout-change');
 	}
 
 	_renderDiff(localContent) {
@@ -255,7 +264,7 @@ class PublishDiffView extends obsidian.ItemView {
 		this.localHash = await this._contentHash(localContent);
 		this._renderDiff(localContent);
 		this._updateHeaderTitle();
-		this.app.workspace.trigger('layout-change');
+		this._forceTabTitleUpdate();
 	}
 
 	async _contentHash(content) {
