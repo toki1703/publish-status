@@ -136,6 +136,7 @@ class PublishDiffView extends obsidian.ItemView {
 		this.publishHash = null;
 		this.localHash = null;
 		this.bodyEl = null;
+		this.headerTitleEl = null;
 		this._rerenderTimer = null;
 	}
 
@@ -190,7 +191,8 @@ class PublishDiffView extends obsidian.ItemView {
 		const header = c.createDiv({ cls: 'publish-diff-header' });
 		const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
 		header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
-		header.createSpan({ cls: 'publish-diff-filepath', text: filePath });
+		this.headerTitleEl = header.createSpan({ cls: 'publish-diff-title' });
+		this._updateHeaderTitle();
 
 		this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
 		const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
@@ -209,7 +211,16 @@ class PublishDiffView extends obsidian.ItemView {
 
 		loadingEl.remove();
 		this._renderDiff(localContent);
+		this._updateHeaderTitle();
 		this.app.workspace.trigger('layout-change');
+	}
+
+	_updateHeaderTitle() {
+		if (!this.headerTitleEl || !this.filePath) return;
+		const name = this.filePath.split('/').pop();
+		const p = this.publishHash ?? '-------';
+		const l = this.localHash   ?? '-------';
+		this.headerTitleEl.setText(`${name} (${p}) ↔ ${name} (${l})`);
 	}
 
 	_renderDiff(localContent) {
@@ -243,6 +254,7 @@ class PublishDiffView extends obsidian.ItemView {
 		const localContent = await this.app.vault.read(vaultFile);
 		this.localHash = await this._contentHash(localContent);
 		this._renderDiff(localContent);
+		this._updateHeaderTitle();
 		this.app.workspace.trigger('layout-change');
 	}
 

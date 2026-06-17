@@ -55,7 +55,7 @@
 	background: var(--background-modifier-border);
 }
 
-.publish-diff-filepath {
+.publish-diff-title {
 	flex: 1;
 	font-size: 12px;
 	color: var(--text-muted);
