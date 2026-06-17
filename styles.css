@@ -26,6 +26,143 @@
 .tree-item-inner.publish-status-deleted  { color: #f14c4c; }
 
 
+/* ── Publish Diff パネル ── */
+
+.publish-diff-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	font-family: var(--font-monospace);
+	font-size: 13px;
+}
+
+.publish-diff-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	font-family: var(--font-interface);
+}
+
+.publish-diff-badge {
+	font-size: 11px;
+	font-weight: 700;
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+}
+
+.publish-diff-filepath {
+	flex: 1;
+	font-size: 12px;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.publish-diff-body {
+	flex: 1;
+	overflow: auto;
+}
+
+.publish-diff-legend {
+	display: flex;
+	gap: 16px;
+	padding: 4px 12px;
+	font-size: 11px;
+	font-family: var(--font-interface);
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.publish-diff-legend-item {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.publish-diff-table {
+	min-width: 100%;
+}
+
+.publish-diff-row {
+	display: flex;
+	align-items: baseline;
+	min-height: 20px;
+	line-height: 20px;
+}
+
+.publish-diff-row:hover {
+	filter: brightness(1.08);
+}
+
+.publish-diff-row-delete {
+	background: var(--color-red-background, rgba(241, 76, 76, 0.15));
+}
+
+.publish-diff-row-insert {
+	background: var(--color-green-background, rgba(115, 201, 145, 0.15));
+}
+
+.publish-diff-row-equal {
+	background: transparent;
+}
+
+.publish-diff-num {
+	min-width: 40px;
+	text-align: right;
+	padding: 0 8px;
+	color: var(--text-faint);
+	font-size: 11px;
+	user-select: none;
+	flex-shrink: 0;
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+.publish-diff-marker {
+	width: 20px;
+	text-align: center;
+	flex-shrink: 0;
+	user-select: none;
+}
+
+.publish-diff-row-delete .publish-diff-marker { color: #f14c4c; }
+.publish-diff-row-insert .publish-diff-marker { color: #73c991; }
+
+.publish-diff-text {
+	flex: 1;
+	padding: 0 8px;
+	white-space: pre;
+	overflow: visible;
+}
+
+.publish-diff-del { color: #f14c4c; }
+.publish-diff-add { color: #73c991; }
+
+.publish-diff-empty,
+.publish-diff-message {
+	padding: 16px;
+	font-family: var(--font-interface);
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.publish-diff-message-warn { color: #e2c08d; }
+.publish-diff-message-error { color: #f14c4c; }
+
+.publish-diff-loading {
+	padding: 16px;
+	font-family: var(--font-interface);
+	font-size: 13px;
+	color: var(--text-faint);
+}
+
+
 /* ── Publish Explorer パネル ── */
 
 .publish-explorer-container {
