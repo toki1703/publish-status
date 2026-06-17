@@ -254,17 +254,23 @@ class PublishDiffView extends obsidian.ItemView {
 	}
 
 	_forceTabTitleUpdate() {
-		this.title = this.viewTitle;
-		const titleEl = this.leaf.tabHeaderInnerTitleEl
-			?? this.leaf.tabHeaderEl?.querySelector('.workspace-tab-header-inner-title');
+		this.viewTitle = this._buildTitle();
+
+		// 方法1: tabHeaderInnerTitleEl への直接書き込み（最優先）
+		const titleEl = this.leaf.tabHeaderInnerTitleEl;
 		if (titleEl) {
-			if (titleEl.setText) {
-				titleEl.setText(this.viewTitle);
-			} else {
-				titleEl.textContent = this.viewTitle;
-			}
+			titleEl.textContent = this.viewTitle;
 		}
-		this.leaf.updateHeader?.();
+
+		// 方法2: view-header-title への直接書き込み
+		const headerTitleEl = this.containerEl
+			.closest('.workspace-leaf')
+			?.querySelector('.view-header-title');
+		if (headerTitleEl) {
+			headerTitleEl.textContent = this.viewTitle;
+		}
+
+		// 方法3: workspace に通知
 		this.app.workspace.trigger('layout-change');
 	}
 
