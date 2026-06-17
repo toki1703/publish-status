@@ -608,6 +608,15 @@ class PublishExplorerView extends obsidian.ItemView {
 
 		const header = container.createDiv({ cls: 'publish-explorer-header' });
 		header.createSpan({ cls: 'publish-explorer-title', text: 'PUBLISH EXPLORER' });
+		const syncBtn = header.createEl('button', { cls: 'publish-explorer-sync-btn clickable-icon' });
+		obsidian.setIcon(syncBtn, 'arrow-up-down');
+		syncBtn.setAttribute('aria-label', 'すべての変更を同期');
+		syncBtn.addEventListener('click', async () => {
+			syncBtn.disabled = true;
+			try { await this.plugin.syncAll(); }
+			finally { syncBtn.disabled = false; }
+		});
+
 		const refreshBtn = header.createEl('button', { cls: 'publish-explorer-refresh-btn clickable-icon' });
 		obsidian.setIcon(refreshBtn, 'refresh-cw');
 		refreshBtn.setAttribute('aria-label', 'Refresh');
@@ -915,6 +924,82 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		}
 	}
 	
+	async syncAll() {
+		const inst = getPublishInstance(this.app);
+		if (!inst) {
+			new obsidian.Notice('Publish plugin が無効です');
+			return;
+		}
+
+		// 最新の状態を取得してから同期
+		await this.refresh();
+
+		const tasks = [];
+
+		for (const [path, status] of this.statusMap) {
+			if (status.letter === 'A' || status.letter === 'M') {
+				// ローカル追加 / 変更 → リモートに反映
+				tasks.push({ path, kind: 'publish' });
+			} else if (status.letter === 'D') {
+				// ローカル削除（= publishMap にある & ローカルにない）→ リモートも削除
+				tasks.push({ path, kind: 'remove' });
+			}
+		}
+
+		// publishMap にあって statusMap にない = リモートのみ存在（D 扱い）→ ローカル削除
+		for (const [path] of this.publishMap) {
+			if (!this.statusMap.has(path)) {
+				const file = this.app.vault.getFileByPath(path);
+				if (!file) {
+					// ローカルに存在しない → リモートを削除
+					tasks.push({ path, kind: 'remove' });
+				}
+			}
+		}
+
+		if (tasks.length === 0) {
+			new obsidian.Notice('同期するファイルはありません');
+			return;
+		}
+
+		new obsidian.Notice(`${tasks.length} 件のファイルを同期中…`);
+
+		let succeeded = 0;
+		let failed = 0;
+
+		for (const task of tasks) {
+			try {
+				if (task.kind === 'publish') {
+					const file = this.app.vault.getFileByPath(task.path);
+					if (!file) { failed++; continue; }
+					const content = await this.app.vault.read(file);
+					const hash = await sha256Hex(content);
+					this.uploadingPaths.add(task.path);
+					this._reRenderExplorer();
+					await uploadPublishMarkdown(inst, task.path, content, hash);
+					this.uploadingPaths.delete(task.path);
+					this._reRenderExplorer();
+					succeeded++;
+				} else if (task.kind === 'remove') {
+					await removePublishFile(inst, task.path);
+					succeeded++;
+				}
+			} catch (e) {
+				this.uploadingPaths.delete(task.path);
+				console.error(`[PublishStatus] syncAll failed: ${task.path}`, e);
+				failed++;
+			}
+		}
+
+		this.uploadingPaths.clear();
+		await this.refresh();
+
+		const msg = failed === 0
+			? `同期完了: ${succeeded} 件`
+			: `同期完了: ${succeeded} 件成功、${failed} 件失敗`;
+		new obsidian.Notice(msg);
+	}
+
 	// [追加] 対象パスの DiffView を取得するヘルパー
 	_getDiffViewForPath(path) {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF)) {
