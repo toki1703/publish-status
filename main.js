@@ -108,20 +108,25 @@ function groupHunks(diff) {
 
 // ── Publish 版コンテンツ取得 ──────────────────────────────────
 
-async function fetchPublishContent(inst, path) {
+async function fetchPublishContent(inst, path, options = {}) {
 	const host = inst?.host;
 	const siteId = inst?.siteId;
 	if (!host || !siteId) return null;
 
 	const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+	const cacheBust = options.cacheBust ? `?publish-status-ts=${Date.now()}` : '';
 	try {
 		const res = await obsidian.requestUrl({
-			url: `https://${host}/access/${siteId}/${encodedPath}`,
+			url: `https://${host}/access/${siteId}/${encodedPath}${cacheBust}`,
 		});
 		if (res.status === 200) return res.text;
 	} catch (_) { /* 取得失敗 */ }
 
 	return null;
+}
+
+function sleep(ms) {
+	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function getPublishInstance(app) {
@@ -141,7 +146,7 @@ async function sha256Hex(content) {
 	return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function uploadPublishMarkdown(inst, path, content) {
+async function uploadPublishMarkdown(inst, path, content, hash) {
 	const host = inst?.host;
 	const siteId = inst?.siteId;
 	const token = getPublishToken();
@@ -153,7 +158,7 @@ async function uploadPublishMarkdown(inst, path, content) {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/octet-stream',
-			'obs-hash': await sha256Hex(content),
+			'obs-hash': hash ?? await sha256Hex(content),
 			'obs-id': siteId,
 			'obs-path': encodeURIComponent(path),
 			'obs-token': token,
@@ -276,7 +281,15 @@ class PublishDiffView extends obsidian.ItemView {
                 uploadBtn.disabled = true;
                 try {
                     const published = await this.plugin.publishFileByPath(this.filePath);
-                    if (published) await this.loadAndRender();
+                    if (published) {
+                        const reflected = await this.waitForPublishedContent(published.hash);
+                        if (reflected) {
+                            await this.loadAndRender();
+                        } else if (this.bodyEl) {
+                            this.bodyEl.empty();
+                            this.renderMessage(this.bodyEl, '公開は完了しました。Publish 側の反映後に再読み込みしてください', 'warn');
+                        }
+                    }
                 } finally {
                     uploadBtn.disabled = false;
                 }
@@ -368,8 +381,31 @@ class PublishDiffView extends obsidian.ItemView {
 
 	async _contentHash(content) {
 		if (!content) return null;
-		const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
-		return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 7);
+		return (await sha256Hex(content)).slice(0, 7);
+	}
+
+	async waitForPublishedContent(expectedHash) {
+		if (!this.bodyEl || !this.filePath || !expectedHash) return false;
+		const inst = getPublishInstance(this.plugin.app);
+		if (!inst) return false;
+
+		const delays = [1000, 1500, 2000, 3000, 4000, 5000];
+		for (let i = 0; i < delays.length; i++) {
+			this.bodyEl.empty();
+			this.bodyEl.createDiv({
+				cls: 'publish-diff-loading',
+				text: `Publish 反映待ち… (${i + 1}/${delays.length})`,
+			});
+
+			await sleep(delays[i]);
+			const publishContent = await fetchPublishContent(inst, this.filePath, { cacheBust: true });
+			if (publishContent !== null && (await sha256Hex(publishContent)) === expectedHash) {
+				return true;
+			}
+		}
+
+		new obsidian.Notice('公開は完了しましたが、Publish 版の反映確認がタイムアウトしました');
+		return false;
 	}
 
 	renderUnified(container, publishContent, localContent) {
@@ -654,10 +690,11 @@ class PublishStatusPlugin extends obsidian.Plugin {
 
 		try {
 			const content = await this.app.vault.read(file);
-			await uploadPublishMarkdown(inst, file.path, content);
+			const hash = await sha256Hex(content);
+			await uploadPublishMarkdown(inst, file.path, content, hash);
 			new obsidian.Notice(`公開しました: ${file.path}`);
 			await this.refresh();
-			return true;
+			return { hash };
 		} catch (e) {
 			console.error('[PublishStatus] upload failed', e);
 			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
