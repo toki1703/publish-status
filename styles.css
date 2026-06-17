@@ -1,5 +1,37 @@
 /* VSCode Git スタイルの Publish ステータスインジケーター */
 
+@keyframes publish-spin {
+	to { transform: rotate(360deg); }
+}
+
+.publish-loading-spinner {
+	display: inline-block;
+	width: 11px;
+	height: 11px;
+	border: 2px solid var(--background-modifier-border);
+	border-top-color: var(--text-muted);
+	border-radius: 50%;
+	animation: publish-spin 0.7s linear infinite;
+	flex-shrink: 0;
+	margin-left: auto;
+	padding-left: 0;
+}
+
+.publish-loading-spinner--lg {
+	width: 20px;
+	height: 20px;
+	border-width: 3px;
+	margin: 0;
+}
+
+.publish-diff-loading-spinner-wrap {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	padding: 40px;
+}
+
+
 .publish-status-letter {
 	font-size: 11px;
 	font-weight: 600;

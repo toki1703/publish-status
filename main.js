@@ -428,16 +428,15 @@ class PublishDiffView extends obsidian.ItemView {
             uploadBtn.addEventListener('click', async () => {
                 if (!this.filePath) return;
                 uploadBtn.disabled = true;
+                if (this.bodyEl) {
+                    this.bodyEl.empty();
+                    this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' })
+                        .createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
+                }
                 try {
                     const published = await this.plugin.publishFileByPath(this.filePath);
                     if (published) {
-                        const reflected = await this.waitForPublishedContent(published.hash);
-                        if (reflected) {
-                            await this.loadAndRender();
-                        } else if (this.bodyEl) {
-                            this.bodyEl.empty();
-                            this.renderMessage(this.bodyEl, '公開は完了しました。Publish 側の反映後に再読み込みしてください', 'warn');
-                        }
+                        await this.loadAndRender();
                     }
                 } finally {
                     uploadBtn.disabled = false;
@@ -683,7 +682,9 @@ class PublishExplorerView extends obsidian.ItemView {
 				text: file.name,
 			});
 
-			if (file.status.letter) {
+			if (this.plugin.uploadingPaths.has(file.path)) {
+				fileRow.createSpan({ cls: 'publish-loading-spinner' });
+			} else if (file.status.letter) {
 				fileRow.createSpan({
 					cls: `publish-status-letter ${file.status.colorCls}`,
 					text: file.status.letter,
@@ -759,6 +760,7 @@ class PublishStatusPlugin extends obsidian.Plugin {
 	async onload() {
 		this.statusMap = new Map();
 		this.publishMap = new Map();
+		this.uploadingPaths = new Set();
 
 		this.registerView(VIEW_TYPE_PUBLISH_EXPLORER, leaf => new PublishExplorerView(leaf, this));
 		this.registerView(VIEW_TYPE_PUBLISH_DIFF,     leaf => new PublishDiffView(leaf, this));
@@ -892,6 +894,9 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			return false;
 		}
 
+		this.uploadingPaths.add(file.path);
+		this._reRenderExplorer();
+
 		try {
 			const content = await this.app.vault.read(file);
 			const hash = await sha256Hex(content);
@@ -903,6 +908,15 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			console.error('[PublishStatus] upload failed', e);
 			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
 			return false;
+		} finally {
+			this.uploadingPaths.delete(file.path);
+			this._reRenderExplorer();
+		}
+	}
+
+	_reRenderExplorer() {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_EXPLORER)) {
+			leaf.view.render();
 		}
 	}
 
