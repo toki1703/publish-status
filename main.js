@@ -129,8 +129,28 @@ async function fetchPublishContent(inst, path, options = {}) {
 		const res = await obsidian.requestUrl({
 			url: `https://${host}/access/${siteId}/${encodedPath}${cacheBust}`,
 		});
-		if (res.status === 200) return res.text;
-	} catch (_) { /* 取得失敗 */ }
+
+		if (res.status === 200) {
+			// Obsidian Publish はファイル非存在時にも 200 OK を返すため、内容で除外する
+			
+			// 判定1: ETag が '404' かどうか（大文字小文字のブレを考慮）
+			const etag = res.headers?.etag ?? res.headers?.ETag;
+			if (etag === '404') {
+				return null;
+			}
+
+			// 判定2: 本文が "## Not Found" のテンプレートかどうか（ETag仕様変更への保険）
+			const text = (res.text ?? '').trim();
+			if (text.startsWith('## Not Found') && text.includes('does not exist.')) {
+				return null;
+			}
+
+			// どちらにも引っかからなければ、正規のコンテンツとして返す
+			return res.text;
+		}
+	} catch (_) { 
+		/* 取得失敗 (ネットワークエラーやガチの404など) */ 
+	}
 
 	return null;
 }
