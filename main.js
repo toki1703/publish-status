@@ -702,13 +702,24 @@ class PublishExplorerView extends obsidian.ItemView {
 				event.preventDefault();
 				const menu = new obsidian.Menu();
 
-				addMenuSectionHeader(menu, 'ローカル');
+				addMenuSectionHeader(menu, '差分');
 				menu.addItem((item) => {
 					item
 						.setTitle('差分を表示する')
 						.setIcon('git-compare')
 						.onClick(() => {
 							this.plugin.openDiff(file.path, file.status);
+						});
+				});
+
+				menu.addSeparator();
+				addMenuSectionHeader(menu, 'ローカル');
+				menu.addItem((item) => {
+					item
+						.setTitle('ローカルを削除する')
+						.setIcon('trash-2')
+						.onClick(async () => {
+							await this.plugin.deleteLocalFile(file.path);
 						});
 				});
 
@@ -931,6 +942,25 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		} catch (e) {
 			console.error('[PublishStatus] copy remote link failed', e);
 			new obsidian.Notice(`リモートのリンクコピーに失敗しました: ${e?.message ?? e}`);
+			return false;
+		}
+	}
+
+	async deleteLocalFile(path) {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!file) {
+			new obsidian.Notice(`ファイルが見つかりません: ${path}`);
+			return false;
+		}
+
+		try {
+			await this.app.vault.trash(file, true);
+			new obsidian.Notice(`ローカルを削除しました: ${path}`);
+			await this.refresh();
+			return true;
+		} catch (e) {
+			console.error('[PublishStatus] delete local failed', e);
+			new obsidian.Notice(`ローカル削除に失敗しました: ${e?.message ?? e}`);
 			return false;
 		}
 	}
