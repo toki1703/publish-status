@@ -425,23 +425,37 @@ class PublishDiffView extends obsidian.ItemView {
             const uploadBtn = header.createEl('button', { cls: 'publish-diff-upload-btn clickable-icon' });
             obsidian.setIcon(uploadBtn, 'upload-cloud');
             uploadBtn.setAttribute('aria-label', '公開する');
-            uploadBtn.addEventListener('click', async () => {
-                if (!this.filePath) return;
-                uploadBtn.disabled = true;
-                if (this.bodyEl) {
-                    this.bodyEl.empty();
-                    this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' })
-                        .createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
-                }
-                try {
-                    const published = await this.plugin.publishFileByPath(this.filePath);
-                    if (published) {
-                        await this.loadAndRender();
-                    }
-                } finally {
-                    uploadBtn.disabled = false;
-                }
-            });
+			uploadBtn.addEventListener('click', async () => {
+				if (!this.filePath) return;
+				uploadBtn.disabled = true;
+				
+				if (this.bodyEl) {
+					this.bodyEl.empty();
+					const wrap = this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' });
+					wrap.createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
+					// （オプション）スピナーの下に待機中であることを示すテキストを置くと親切です
+					wrap.createDiv({ 
+						cls: 'publish-diff-loading-text', 
+						text: 'アップロード・反映待機中...',
+						attr: { style: 'margin-top: 12px; color: var(--text-muted); font-size: 0.9em;' }
+					});
+				}
+				
+				try {
+					const published = await this.plugin.publishFileByPath(this.filePath);
+					// アップロード成功後、ハッシュ一致まで待機
+					if (published && published.hash) {
+						await this.waitForPublishedContent(published.hash);
+					}
+				} catch (e) {
+					// エラー時はコンソールにログを出しつつ握りつぶさないようにする
+					console.error('[PublishStatus] Diff view upload error', e);
+				} finally {
+					uploadBtn.disabled = false;
+					// 成功・失敗・タイムアウトに関わらず、最後に必ず画面を再描画してスピナーを消す
+					await this.loadAndRender();
+				}
+			});
         }
 
         this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
@@ -536,26 +550,23 @@ class PublishDiffView extends obsidian.ItemView {
 	}
 
 	async waitForPublishedContent(expectedHash) {
-		if (!this.bodyEl || !this.filePath || !expectedHash) return false;
+		if (!this.filePath || !expectedHash) return false;
 		const inst = getPublishInstance(this.plugin.app);
 		if (!inst) return false;
 
-		const delays = [1000, 1500, 2000, 3000, 4000, 5000];
-		for (let i = 0; i < delays.length; i++) {
-			this.bodyEl.empty();
-			this.bodyEl.createDiv({
-				cls: 'publish-diff-loading',
-				text: `Publish 反映待ち… (${i + 1}/${delays.length})`,
-			});
+		const timeoutMs = 15000; // タイムアウト: 15秒
+		const intervalMs = 800;  // 通信確認間隔: 0.8秒
+		const startTime = Date.now();
 
-			await sleep(delays[i]);
+		while (Date.now() - startTime <= timeoutMs) {
+			await sleep(intervalMs);
 			const publishContent = await fetchPublishContent(inst, this.filePath, { cacheBust: true });
 			if (publishContent !== null && (await sha256Hex(publishContent)) === expectedHash) {
-				return true;
+				return true; // ハッシュが一致したら待機終了
 			}
 		}
 
-		new obsidian.Notice('公開は完了しましたが、Publish 版の反映確認がタイムアウトしました');
+		new obsidian.Notice('公開は完了しましたが、Publish 側への反映確認がタイムアウトしました');
 		return false;
 	}
 
