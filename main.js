@@ -458,8 +458,8 @@ class PublishDiffView extends obsidian.ItemView {
         const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
 
         const inst = getPublishInstance(this.plugin.app);
-		// [修正] cacheBust オプションをそのまま渡す
-        this.publishContent = inst
+		// [修正] statusLetter が 'A' (新規追加) の場合はリモート取得をスキップする
+        this.publishContent = (inst && statusLetter !== 'A')
 			? await fetchPublishContent(inst, filePath, { cacheBust: !!options.cacheBust })
 			: null;
         if (renderToken !== this._renderToken) return;
