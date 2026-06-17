@@ -48,20 +48,19 @@ function buildTree(entries) {
 			}
 			node = node.children[dir];
 		}
-		node.files.push({ name: fileName, path: entry.path, status: entry.status });
+		node.files.push({ name: fileName, path: entry.path, status: entry.status, uploading: entry.uploading });
 	}
 	return root;
 }
 
-function buildPublishExplorerEntries(publishMap, statusMap) {
-	const entryMap = new Map(publishMap);
-	for (const [path, status] of statusMap) {
-		if (status.letter === 'A' && !entryMap.has(path)) {
-			entryMap.set(path, status);
+function buildExplorerEntries(files) {
+	const entries = [];
+	for (const [path, entry] of Object.entries(files)) {
+		if (entry.publish !== null || entry.local?.letter === 'A') {
+			entries.push({ path, status: entry.publish ?? entry.local, uploading: entry.uploading });
 		}
 	}
-	return Array.from(entryMap, ([path, status]) => ({ path, status }))
-		.sort((a, b) => a.path.localeCompare(b.path));
+	return entries.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // ── diff アルゴリズム (LCS) ───────────────────────────────────
@@ -644,7 +643,7 @@ class PublishExplorerView extends obsidian.ItemView {
 
 		const content = container.createDiv({ cls: 'publish-explorer-content' });
 
-		const entries = buildPublishExplorerEntries(this.plugin.publishMap, this.plugin.statusMap);
+		const entries = buildExplorerEntries(this.plugin.state.files);
 		if (entries.length === 0) {
 			content.createDiv({ cls: 'publish-explorer-empty', text: 'Publish 上にファイルがありません' });
 			return;
@@ -693,7 +692,7 @@ class PublishExplorerView extends obsidian.ItemView {
 				text: file.name,
 			});
 
-			if (this.plugin.uploadingPaths.has(file.path)) {
+			if (file.uploading) {
 				fileRow.createSpan({ cls: 'publish-loading-spinner' });
 			} else if (file.status.letter) {
 				fileRow.createSpan({
@@ -768,9 +767,7 @@ class PublishExplorerView extends obsidian.ItemView {
 
 class PublishStatusPlugin extends obsidian.Plugin {
 	async onload() {
-		this.statusMap = new Map();
-		this.publishMap = new Map();
-		this.uploadingPaths = new Set();
+		this.state = { files: {} };
 
 		this.registerView(VIEW_TYPE_PUBLISH_EXPLORER, leaf => new PublishExplorerView(leaf, this));
 		this.registerView(VIEW_TYPE_PUBLISH_DIFF,     leaf => new PublishDiffView(leaf, this));
@@ -868,16 +865,21 @@ class PublishStatusPlugin extends obsidian.Plugin {
 
 		try {
 			const changes = await inst.scanForChanges();
-			this.statusMap.clear();
-			this.publishMap.clear();
+			const prevFiles = this.state.files;
+			this.state = { files: {} };
 			for (const item of changes) {
-				const status = resolveStatus(item);
-				if (status) this.statusMap.set(item.path, status);
-
-				const publishStatus = resolvePublishStatus(item);
-				if (publishStatus) this.publishMap.set(item.path, publishStatus);
+				const local = resolveStatus(item);
+				const publish = resolvePublishStatus(item);
+				if (local || publish) {
+					this.state.files[item.path] = {
+						local,
+						publish,
+						status: local?.letter ?? null,
+						uploading: prevFiles[item.path]?.uploading ?? false,
+					};
+				}
 			}
-			console.log('[PublishStatus] statusMap:', this.statusMap.size, 'publishMap:', this.publishMap.size);
+			console.log('[PublishStatus] files:', Object.keys(this.state.files).length);
 			this.decorate();
 			for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_EXPLORER)) {
 				leaf.view.render();
@@ -905,7 +907,9 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		}
 
 		// エクスプローラー側スピナー開始
-		this.uploadingPaths.add(file.path);
+		const fileEntry = this.state.files[file.path] ?? { local: null, publish: null, status: null, uploading: false };
+		fileEntry.uploading = true;
+		this.state.files[file.path] = fileEntry;
 		this._reRenderExplorer();
 
 		// [修正] showLoadingSpinner は _renderToken をインクリメントするので
@@ -932,7 +936,8 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			return false;
 		} finally {
 			// エクスプローラー側スピナー解除
-			this.uploadingPaths.delete(file.path);
+			const uploadEntry = this.state.files[file.path];
+			if (uploadEntry) uploadEntry.uploading = false;
 			this._reRenderExplorer();
 
 			// [修正] 成功時はキャッシュバスト付きで再描画（古いコンテンツを掴まない）
@@ -956,22 +961,17 @@ class PublishStatusPlugin extends obsidian.Plugin {
 
 		const tasks = [];
 
-		for (const [path, status] of this.statusMap) {
-			if (status.letter === 'A' || status.letter === 'M') {
+		for (const [path, entry] of Object.entries(this.state.files)) {
+			if (entry.local?.letter === 'A' || entry.local?.letter === 'M') {
 				// ローカル追加 / 変更 → リモートに反映
 				tasks.push({ path, kind: 'publish' });
-			} else if (status.letter === 'D') {
-				// ローカル削除（= publishMap にある & ローカルにない）→ リモートも削除
+			} else if (entry.local?.letter === 'D') {
+				// ローカル削除（= publish にある & ローカルにない）→ リモートも削除
 				tasks.push({ path, kind: 'remove' });
-			}
-		}
-
-		// publishMap にあって statusMap にない = リモートのみ存在（D 扱い）→ ローカル削除
-		for (const [path] of this.publishMap) {
-			if (!this.statusMap.has(path)) {
+			} else if (entry.publish && !entry.local) {
+				// publish にあって local がない = リモートのみ存在 → ローカルに存在しなければリモートを削除
 				const file = this.app.vault.getFileByPath(path);
 				if (!file) {
-					// ローカルに存在しない → リモートを削除
 					tasks.push({ path, kind: 'remove' });
 				}
 			}
@@ -994,10 +994,10 @@ class PublishStatusPlugin extends obsidian.Plugin {
 					if (!file) { failed++; continue; }
 					const content = await this.app.vault.read(file);
 					const hash = await sha256Hex(content);
-					this.uploadingPaths.add(task.path);
+					if (this.state.files[task.path]) this.state.files[task.path].uploading = true;
 					this._reRenderExplorer();
 					await uploadPublishMarkdown(inst, task.path, content, hash);
-					this.uploadingPaths.delete(task.path);
+					if (this.state.files[task.path]) this.state.files[task.path].uploading = false;
 					this._reRenderExplorer();
 					succeeded++;
 				} else if (task.kind === 'remove') {
@@ -1005,13 +1005,15 @@ class PublishStatusPlugin extends obsidian.Plugin {
 					succeeded++;
 				}
 			} catch (e) {
-				this.uploadingPaths.delete(task.path);
+				if (this.state.files[task.path]) this.state.files[task.path].uploading = false;
 				console.error(`[PublishStatus] syncAll failed: ${task.path}`, e);
 				failed++;
 			}
 		}
 
-		this.uploadingPaths.clear();
+		for (const entry of Object.values(this.state.files)) {
+			entry.uploading = false;
+		}
 		await this.refresh();
 
 		const msg = failed === 0
@@ -1126,7 +1128,7 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		let decorated = 0;
 		for (const titleEl of titleEls) {
 			const path = titleEl.getAttribute('data-path');
-			const status = this.statusMap.get(path);
+			const status = this.state.files[path]?.local;
 			if (!status) continue;
 
 			titleEl.querySelector('.tree-item-inner')?.classList.add(status.colorCls);
