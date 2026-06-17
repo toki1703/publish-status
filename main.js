@@ -127,39 +127,67 @@ async function fetchPublishContent(inst, path) {
 // ── Publish Diff View ─────────────────────────────────────────
 
 class PublishDiffView extends obsidian.ItemView {
-	constructor(leaf, plugin) {
-		super(leaf);
-		this.plugin = plugin;
-		this.filePath = null;
-		this.statusLetter = null;
-		this.publishContent = null;
-		this.publishHash = null;
-		this.localHash = null;
-		this.bodyEl = null;
-		this.headerTitleEl = null;
-		this._rerenderTimer = null;
-	}
+    constructor(leaf, plugin) {
+        super(leaf);
+        this.plugin = plugin;
+        this.filePath = null;
+        this.statusLetter = null;
+        this.publishContent = null;
+        this.publishHash = null;
+        this.localHash = null;
+        this.bodyEl = null;
+        this.headerTitleEl = null;
+        this._rerenderTimer = null;
+        this._renderToken = 0;
+        this.viewTitle = 'Publish Diff';
+    }
 
-	getViewType() { return VIEW_TYPE_PUBLISH_DIFF; }
-	getDisplayText() {
-		const name = this.filePath?.split('/').pop() ?? 'Publish Diff';
-		const p = this.publishHash ?? '-------';
-		const l = this.localHash   ?? '-------';
-		return `${name} (${p}) ↔ ${name} (${l})`;
-	}
-	getIcon() { return 'git-compare'; }
+    getViewType() { return VIEW_TYPE_PUBLISH_DIFF; }
+    getDisplayText() { return this.viewTitle; }
+    getIcon() { return 'git-compare'; }
 
-	async setState(state, result) {
-		this.filePath = state.path ?? null;
-		this.statusLetter = state.statusLetter ?? null;
-		await super.setState(state, result);
-		if (this.filePath) await this.loadAndRender();
-	}
+    _buildTitle() {
+        const name = this.filePath?.split('/').pop() ?? 'Publish Diff';
+        const p = this.publishHash ?? '-------';
+        const l = this.localHash ?? '-------';
+        return `${name} (${p}) ↔ ${name} (${l})`;
+    }
 
-	getState() {
-		return { path: this.filePath, statusLetter: this.statusLetter };
-	}
+    async setState(state = {}, result) {
+        this.filePath = state.path ?? null;
+        this.statusLetter = state.statusLetter ?? null;
+        this.viewTitle = state.viewTitle ?? this._buildTitle();
+        await super.setState(state, result);
+        this._forceTabTitleUpdate();
+        if (this.filePath) await this.loadAndRender();
+    }
 
+    async setFile(path, statusLetter) {
+        this.filePath = path;
+        this.statusLetter = statusLetter ?? null;
+        this.publishHash = null;
+        this.localHash = null;
+        this.publishContent = null;
+        this.viewTitle = this._buildTitle();
+        this._updateHeaderTitle();
+        this._forceTabTitleUpdate();
+        await this.loadAndRender();
+    }
+
+    getState() {
+        return {
+            path: this.filePath,
+            statusLetter: this.statusLetter,
+            viewTitle: this.viewTitle,
+        };
+    }
+
+    async _syncTitleState() {
+        this.viewTitle = this._buildTitle();
+        this._updateHeaderTitle();
+        this._forceTabTitleUpdate();
+    }
+	
 	async onOpen() {
 		const c = this.containerEl.children[1];
 		c.empty();
@@ -180,54 +208,62 @@ class PublishDiffView extends obsidian.ItemView {
 		clearTimeout(this._rerenderTimer);
 	}
 
-	async loadAndRender() {
-		const c = this.containerEl.children[1];
-		c.empty();
-		c.addClass('publish-diff-container');
+    async loadAndRender() {
+        const renderToken = ++this._renderToken;
+        const c = this.containerEl.children[1];
+        c.empty();
+        c.addClass('publish-diff-container');
 
-		const { filePath, statusLetter } = this;
+        const { filePath, statusLetter } = this;
 
-		// ファイル切り替え時に前のハッシュをリセット
-		this.publishHash = null;
-		this.localHash   = null;
+        this.publishHash = null;
+        this.localHash = null;
+        this.viewTitle = this._buildTitle();
 
-		const header = c.createDiv({ cls: 'publish-diff-header' });
-		const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
-		header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
-		this.headerTitleEl = header.createSpan({ cls: 'publish-diff-title' });
-		this._updateHeaderTitle();
-		this._forceTabTitleUpdate();
+        const header = c.createDiv({ cls: 'publish-diff-header' });
+        const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
+        header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
+        this.headerTitleEl = header.createSpan({ cls: 'publish-diff-title', text: this.viewTitle });
 
-		this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
-		const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
+        this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
+        const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
 
-		const inst = this.plugin.app.internalPlugins?.plugins?.['publish']?.instance;
-		this.publishContent = inst ? await fetchPublishContent(inst, filePath) : null;
+        const inst = this.plugin.app.internalPlugins?.plugins?.['publish']?.instance;
+        this.publishContent = inst ? await fetchPublishContent(inst, filePath) : null;
+        if (renderToken !== this._renderToken) return;
 
-		let localContent = null;
-		if (statusLetter !== 'D') {
-			const vaultFile = this.app.vault.getFileByPath(filePath);
-			if (vaultFile) localContent = await this.app.vault.read(vaultFile);
-		}
+        let localContent = null;
+        if (statusLetter !== 'D') {
+            const vaultFile = this.app.vault.getFileByPath(filePath);
+            if (vaultFile) localContent = await this.app.vault.read(vaultFile);
+        }
+        if (renderToken !== this._renderToken) return;
 
-		this.publishHash = await this._contentHash(this.publishContent);
-		this.localHash   = await this._contentHash(localContent);
+        this.publishHash = await this._contentHash(this.publishContent);
+        this.localHash = await this._contentHash(localContent);
+        if (renderToken !== this._renderToken) return;
 
-		loadingEl.remove();
-		this._renderDiff(localContent);
-		this._updateHeaderTitle();
-		this._forceTabTitleUpdate();
-	}
+        loadingEl.remove();
+        this._renderDiff(localContent);
+        await this._syncTitleState();
+    }
 
 	_updateHeaderTitle() {
 		if (!this.headerTitleEl || !this.filePath) return;
-		const name = this.filePath.split('/').pop();
-		const p = this.publishHash ?? '-------';
-		const l = this.localHash   ?? '-------';
-		this.headerTitleEl.setText(`${name} (${p}) ↔ ${name} (${l})`);
+		this.headerTitleEl.setText(this.viewTitle);
 	}
 
 	_forceTabTitleUpdate() {
+		this.title = this.viewTitle;
+		const titleEl = this.leaf.tabHeaderInnerTitleEl
+			?? this.leaf.tabHeaderEl?.querySelector('.workspace-tab-header-inner-title');
+		if (titleEl) {
+			if (titleEl.setText) {
+				titleEl.setText(this.viewTitle);
+			} else {
+				titleEl.textContent = this.viewTitle;
+			}
+		}
 		this.leaf.updateHeader?.();
 		this.app.workspace.trigger('layout-change');
 	}
@@ -263,8 +299,7 @@ class PublishDiffView extends obsidian.ItemView {
 		const localContent = await this.app.vault.read(vaultFile);
 		this.localHash = await this._contentHash(localContent);
 		this._renderDiff(localContent);
-		this._updateHeaderTitle();
-		this._forceTabTitleUpdate();
+		await this._syncTitleState();
 	}
 
 	async _contentHash(content) {
@@ -501,28 +536,25 @@ class PublishStatusPlugin extends obsidian.Plugin {
 	}
 
 	async openDiff(path, status) {
-		// Diff タブはシングルトン: 既存があれば更新、なければ新規作成してピン止め
 		const diffLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF);
 		let diffLeaf = diffLeaves[0] ?? null;
 
 		if (diffLeaf) {
-			await diffLeaf.setViewState({
-				type: VIEW_TYPE_PUBLISH_DIFF,
-				state: { path, statusLetter: status.letter },
-			});
-			this.app.workspace.revealLeaf(diffLeaf);
+			await this.app.workspace.revealLeaf(diffLeaf);
 		} else {
 			diffLeaf = this.app.workspace.getLeaf('tab');
 			await diffLeaf.setViewState({
 				type: VIEW_TYPE_PUBLISH_DIFF,
-				state: { path, statusLetter: status.letter },
 				active: true,
 			});
 			diffLeaf.setPinned(true);
 			this.fileLeaf = null;
 		}
 
-		// 実ファイルも同様にシングルトン: 既存ペインを更新、なければ垂直分割
+		if (diffLeaf.view?.setFile) {
+			await diffLeaf.view.setFile(path, status.letter);
+		}
+
 		if (status.letter !== 'D') {
 			const file = this.app.vault.getFileByPath(path);
 			if (file) {
