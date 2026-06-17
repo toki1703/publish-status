@@ -475,31 +475,38 @@ class PublishStatusPlugin extends obsidian.Plugin {
 	}
 
 	async openDiff(path, status) {
-		// 同じパスの Diff が既に開いていれば再利用
-		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF)) {
-			if (leaf.view.filePath === path) {
-				this.app.workspace.revealLeaf(leaf);
-				return;
-			}
+		// Diff タブはシングルトン: 既存があれば更新、なければ新規作成してピン止め
+		const diffLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF);
+		let diffLeaf = diffLeaves[0] ?? null;
+
+		if (diffLeaf) {
+			await diffLeaf.setViewState({
+				type: VIEW_TYPE_PUBLISH_DIFF,
+				state: { path, statusLetter: status.letter },
+			});
+			this.app.workspace.revealLeaf(diffLeaf);
+		} else {
+			diffLeaf = this.app.workspace.getLeaf('tab');
+			await diffLeaf.setViewState({
+				type: VIEW_TYPE_PUBLISH_DIFF,
+				state: { path, statusLetter: status.letter },
+				active: true,
+			});
+			diffLeaf.setPinned(true);
+			this.fileLeaf = null;
 		}
 
-		// Diff タブを開いてピン止め
-		const diffLeaf = this.app.workspace.getLeaf('tab');
-		await diffLeaf.setViewState({
-			type: VIEW_TYPE_PUBLISH_DIFF,
-			state: { path, statusLetter: status.letter },
-			active: true,
-		});
-		// diffLeaf.setPinned(true);
-
-		// 実ファイルを右に垂直分割して開く (削除ファイル以外)
+		// 実ファイルも同様にシングルトン: 既存ペインを更新、なければ垂直分割
 		if (status.letter !== 'D') {
 			const file = this.app.vault.getFileByPath(path);
 			if (file) {
-				this.app.workspace.revealLeaf(diffLeaf);
-				const fileLeaf = this.app.workspace.getLeaf('split', 'vertical');
-				await fileLeaf.openFile(file, { active: true });
-				// fileLeaf.setPinned(true);
+				if (this.fileLeaf?.parent) {
+					await this.fileLeaf.openFile(file, { active: true });
+				} else {
+					this.app.workspace.revealLeaf(diffLeaf);
+					this.fileLeaf = this.app.workspace.getLeaf('split', 'vertical');
+					await this.fileLeaf.openFile(file, { active: true });
+				}
 			}
 		}
 	}
