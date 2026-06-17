@@ -119,13 +119,15 @@ async function fetchPublishContent(inst, path, permalink = null) {
 				return null;
 			}
 
-			// native fetch でリダイレクト先 URL (= サイトのベース URL) を取得
+			// レスポンス JSON の url フィールドがサイトのベース URL
 			const res = await fetch('https://publish.obsidian.md/api/customurl', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ host: inst.host, id: inst.siteId, token }),
 			});
-			inst._diffBaseUrl = res.url.replace(/\/+$/, '');
+			const data = await res.json();
+			console.log('[PublishDiff] customurl response:', data);
+			inst._diffBaseUrl = (data.url ?? '').replace(/\/+$/, '');
 			console.log('[PublishDiff] baseUrl:', inst._diffBaseUrl);
 		} catch (e) {
 			console.warn('[PublishDiff] customurl 取得失敗:', e);
@@ -142,9 +144,11 @@ async function fetchPublishContent(inst, path, permalink = null) {
 	const urlPath = rawPath.split('/').map(s => encodeURIComponent(s)).join('/');
 
 	// ベース URL からファイルコンテンツを取得
+	const fileUrl = `${inst._diffBaseUrl}/${urlPath}`;
+	console.log('[PublishDiff] fetch URL:', fileUrl);
 	try {
 		const res = await obsidian.requestUrl({
-			url: `${inst._diffBaseUrl}/${urlPath}`,
+			url: fileUrl,
 		});
 		if (res.status === 200) return res.text;
 	} catch (e) {
