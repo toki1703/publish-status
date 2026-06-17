@@ -108,27 +108,44 @@ function groupHunks(diff) {
 
 // ── Publish 版コンテンツ取得 ──────────────────────────────────
 
-async function fetchPublishContent(inst, path) {
-	// Strategy 1: inst の既知メソッドを試す
-	for (const name of ['getContent', 'getFileContent', 'readRemote', 'downloadFile', 'getMarkdown']) {
-		if (typeof inst[name] === 'function') {
-			try {
-				const r = await inst[name](path);
-				if (typeof r === 'string') return r;
-				if (r?.content && typeof r.content === 'string') return r.content;
-			} catch (_) { /* 次を試す */ }
+async function fetchPublishContent(inst, path, permalink = null) {
+	// サイトのベース URL を取得 (初回のみ; inst にキャッシュ)
+	if (!inst._diffBaseUrl) {
+		try {
+			const account = JSON.parse(localStorage.getItem('obsidian-account') ?? 'null');
+			const token = account?.token;
+			if (!token) {
+				console.warn('[PublishDiff] obsidian-account token が見つかりません');
+				return null;
+			}
+
+			// native fetch でリダイレクト先 URL (= サイトのベース URL) を取得
+			const res = await fetch('https://publish.obsidian.md/api/customurl', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ host: inst.host, id: inst.siteId, token }),
+			});
+			inst._diffBaseUrl = res.url.replace(/\/+$/, '');
+			console.log('[PublishDiff] baseUrl:', inst._diffBaseUrl);
+		} catch (e) {
+			console.warn('[PublishDiff] customurl 取得失敗:', e);
+			return null;
 		}
 	}
 
-	// Strategy 2: Obsidian Publish CDN (uid が取れる場合)
-	const uid = inst?.options?.uid ?? inst?.data?.uid ?? inst?.publishSettings?.uid;
-	if (uid) {
-		try {
-			const res = await obsidian.requestUrl({
-				url: `https://publish.obsidian.md/access?vault=${uid}&path=${encodeURIComponent(path)}`,
-			});
-			if (res.status === 200) return res.text;
-		} catch (_) { /* 取得失敗 */ }
+	// permalink があればそちらを優先 (Publish の仕様に準拠)
+	const urlPath = permalink != null
+		? String(permalink).replace(/^\/+/, '')
+		: path;
+
+	// ベース URL からファイルコンテンツを取得
+	try {
+		const res = await obsidian.requestUrl({
+			url: `${inst._diffBaseUrl}/${urlPath}`,
+		});
+		if (res.status === 200) return res.text;
+	} catch (e) {
+		console.warn('[PublishDiff] ファイル取得失敗:', e);
 	}
 
 	return null;
@@ -199,9 +216,19 @@ class PublishDiffView extends obsidian.ItemView {
 			if (vaultFile) localContent = await this.app.vault.read(vaultFile);
 		}
 
+		// frontmatter の permalink を取得 (D ステータスはローカルにないので null)
+		let permalink = null;
+		if (statusLetter !== 'D') {
+			const vaultFile = this.app.vault.getFileByPath(filePath);
+			if (vaultFile) {
+				permalink = this.app.metadataCache.getFileCache(vaultFile)
+					?.frontmatter?.permalink ?? null;
+			}
+		}
+
 		// Publish 版
 		let publishContent = null;
-		if (inst) publishContent = await fetchPublishContent(inst, filePath);
+		if (inst) publishContent = await fetchPublishContent(inst, filePath, permalink);
 
 		loadingEl.remove();
 
