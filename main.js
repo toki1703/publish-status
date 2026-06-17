@@ -124,6 +124,49 @@ async function fetchPublishContent(inst, path) {
 	return null;
 }
 
+function getPublishInstance(app) {
+	return app.internalPlugins?.plugins?.['publish']?.instance;
+}
+
+function getPublishToken() {
+	try {
+		return JSON.parse(localStorage['obsidian-account'] ?? '{}')?.token ?? null;
+	} catch (_) {
+		return null;
+	}
+}
+
+async function sha256Hex(content) {
+	const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+	return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function uploadPublishMarkdown(inst, path, content) {
+	const host = inst?.host;
+	const siteId = inst?.siteId;
+	const token = getPublishToken();
+	if (!host || !siteId) throw new Error('Publish site information is missing');
+	if (!token) throw new Error('Obsidian account token is missing');
+
+	const res = await obsidian.requestUrl({
+		url: `https://${host}/api/upload`,
+		method: 'POST',
+		headers: {
+			'content-type': 'application/octet-stream',
+			'obs-hash': await sha256Hex(content),
+			'obs-id': siteId,
+			'obs-path': encodeURIComponent(path),
+			'obs-token': token,
+		},
+		body: content,
+	});
+
+	if (res.status < 200 || res.status >= 300) {
+		throw new Error(`Upload failed with status ${res.status}`);
+	}
+	return res;
+}
+
 // ── Publish Diff View ─────────────────────────────────────────
 
 class PublishDiffView extends obsidian.ItemView {
@@ -224,11 +267,26 @@ class PublishDiffView extends obsidian.ItemView {
         const colorCls = { D: 'publish-status-deleted', M: 'publish-status-modified', A: 'publish-status-added' }[statusLetter] ?? 'publish-status-clean';
         header.createSpan({ cls: `publish-diff-badge ${colorCls}`, text: statusLetter ?? '?' });
         this.headerTitleEl = header.createSpan({ cls: 'publish-diff-title', text: this.viewTitle });
+        if (statusLetter !== 'D') {
+            const uploadBtn = header.createEl('button', { cls: 'publish-diff-upload-btn clickable-icon' });
+            obsidian.setIcon(uploadBtn, 'upload-cloud');
+            uploadBtn.setAttribute('aria-label', '公開する');
+            uploadBtn.addEventListener('click', async () => {
+                if (!this.filePath) return;
+                uploadBtn.disabled = true;
+                try {
+                    const published = await this.plugin.publishFileByPath(this.filePath);
+                    if (published) await this.loadAndRender();
+                } finally {
+                    uploadBtn.disabled = false;
+                }
+            });
+        }
 
         this.bodyEl = c.createDiv({ cls: 'publish-diff-body' });
         const loadingEl = this.bodyEl.createDiv({ cls: 'publish-diff-loading', text: 'Publish 版を取得中…' });
 
-        const inst = this.plugin.app.internalPlugins?.plugins?.['publish']?.instance;
+        const inst = getPublishInstance(this.plugin.app);
         this.publishContent = inst ? await fetchPublishContent(inst, filePath) : null;
         if (renderToken !== this._renderToken) return;
 
@@ -477,6 +535,17 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			callback: () => this.openPublishExplorer(),
 		});
 
+		this.addCommand({
+			id: 'publish-current-file',
+			name: 'Publish Current File',
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!checking) void this.publishFile(file);
+				return true;
+			},
+		});
+
 		this.addRibbonIcon('upload-cloud', 'Publish Explorer を開く', () => this.openPublishExplorer());
 
 		this.app.workspace.onLayoutReady(async () => { await this.refresh(); });
@@ -539,7 +608,7 @@ class PublishStatusPlugin extends obsidian.Plugin {
 	}
 
 	async refresh() {
-		const inst = this.app.internalPlugins?.plugins?.['publish']?.instance;
+		const inst = getPublishInstance(this.app);
 		if (!inst) {
 			new obsidian.Notice('Publish plugin が無効です');
 			return;
@@ -564,6 +633,35 @@ class PublishStatusPlugin extends obsidian.Plugin {
 		} catch (e) {
 			console.error('[PublishStatus] scanForChanges failed', e);
 			new obsidian.Notice('Publish Status の取得に失敗しました');
+		}
+	}
+
+	async publishFileByPath(path) {
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) {
+			new obsidian.Notice(`ファイルが見つかりません: ${path}`);
+			return false;
+		}
+		return this.publishFile(file);
+	}
+
+	async publishFile(file) {
+		const inst = getPublishInstance(this.app);
+		if (!inst) {
+			new obsidian.Notice('Publish plugin が無効です');
+			return false;
+		}
+
+		try {
+			const content = await this.app.vault.read(file);
+			await uploadPublishMarkdown(inst, file.path, content);
+			new obsidian.Notice(`公開しました: ${file.path}`);
+			await this.refresh();
+			return true;
+		} catch (e) {
+			console.error('[PublishStatus] upload failed', e);
+			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
+			return false;
 		}
 	}
 

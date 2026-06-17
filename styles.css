@@ -64,6 +64,27 @@
 	text-overflow: ellipsis;
 }
 
+.publish-diff-upload-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 2px 4px;
+	color: var(--text-muted);
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.publish-diff-upload-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.publish-diff-upload-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
 .publish-diff-body {
 	flex: 1;
 	overflow: auto;
