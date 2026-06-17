@@ -428,32 +428,11 @@ class PublishDiffView extends obsidian.ItemView {
 			uploadBtn.addEventListener('click', async () => {
 				if (!this.filePath) return;
 				uploadBtn.disabled = true;
-				
-				if (this.bodyEl) {
-					this.bodyEl.empty();
-					const wrap = this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' });
-					wrap.createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
-					// （オプション）スピナーの下に待機中であることを示すテキストを置くと親切です
-					wrap.createDiv({ 
-						cls: 'publish-diff-loading-text', 
-						text: 'アップロード・反映待機中...',
-						attr: { style: 'margin-top: 12px; color: var(--text-muted); font-size: 0.9em;' }
-					});
-				}
-				
 				try {
-					const published = await this.plugin.publishFileByPath(this.filePath);
-					// アップロード成功後、ハッシュ一致まで待機
-					if (published && published.hash) {
-						await this.waitForPublishedContent(published.hash);
-					}
-				} catch (e) {
-					// エラー時はコンソールにログを出しつつ握りつぶさないようにする
-					console.error('[PublishStatus] Diff view upload error', e);
+					// プラグイン側の共通処理を呼び出す（スピナーや待機はあちらで一元管理されます）
+					await this.plugin.publishFileByPath(this.filePath);
 				} finally {
 					uploadBtn.disabled = false;
-					// 成功・失敗・タイムアウトに関わらず、最後に必ず画面を再描画してスピナーを消す
-					await this.loadAndRender();
 				}
 			});
         }
@@ -507,6 +486,19 @@ class PublishDiffView extends obsidian.ItemView {
 		this.app.workspace.trigger('layout-change');
 	}
 
+	// 外部からスピナー表示を強制するメソッド
+	showLoadingSpinner() {
+		if (!this.bodyEl) return;
+		this.bodyEl.empty();
+		const wrap = this.bodyEl.createDiv({ cls: 'publish-diff-loading-spinner-wrap' });
+		wrap.createSpan({ cls: 'publish-loading-spinner publish-loading-spinner--lg' });
+		wrap.createDiv({ 
+			cls: 'publish-diff-loading-text', 
+			text: 'アップロード・反映待機中...',
+			attr: { style: 'margin-top: 12px; color: var(--text-muted); font-size: 0.9em;' }
+		});
+	}
+
 	_renderDiff(localContent) {
 		if (!this.bodyEl) return;
 		this.bodyEl.empty();
@@ -547,27 +539,6 @@ class PublishDiffView extends obsidian.ItemView {
 	async _contentHash(content) {
 		if (!content) return null;
 		return (await sha256Hex(content)).slice(0, 7);
-	}
-
-	async waitForPublishedContent(expectedHash) {
-		if (!this.filePath || !expectedHash) return false;
-		const inst = getPublishInstance(this.plugin.app);
-		if (!inst) return false;
-
-		const timeoutMs = 15000; // タイムアウト: 15秒
-		const intervalMs = 800;  // 通信確認間隔: 0.8秒
-		const startTime = Date.now();
-
-		while (Date.now() - startTime <= timeoutMs) {
-			await sleep(intervalMs);
-			const publishContent = await fetchPublishContent(inst, this.filePath, { cacheBust: true });
-			if (publishContent !== null && (await sha256Hex(publishContent)) === expectedHash) {
-				return true; // ハッシュが一致したら待機終了
-			}
-		}
-
-		new obsidian.Notice('公開は完了しましたが、Publish 側への反映確認がタイムアウトしました');
-		return false;
 	}
 
 	renderUnified(container, publishContent, localContent) {
@@ -905,13 +876,28 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			return false;
 		}
 
+		// エクスプローラー側のツリーをスピナー状態にする
 		this.uploadingPaths.add(file.path);
 		this._reRenderExplorer();
+
+		// 【追加】もしこのファイルが現在Diff画面で開かれていれば、Diff画面もスピナー状態にする
+		this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF).forEach(leaf => {
+			if (leaf.view.filePath === file.path && typeof leaf.view.showLoadingSpinner === 'function') {
+				leaf.view.showLoadingSpinner();
+			}
+		});
 
 		try {
 			const content = await this.app.vault.read(file);
 			const hash = await sha256Hex(content);
 			await uploadPublishMarkdown(inst, file.path, content, hash);
+
+			// 【条件1】ハッシュが一致するまでループ待機（15秒制限、0.8秒間隔）
+			await this.waitForPublishedContent(file.path, hash);
+
+			// 【条件2】ハッシュ一致後、さらに0.5秒待機
+			await sleep(500);
+
 			new obsidian.Notice(`公開しました: ${file.path}`);
 			await this.refresh();
 			return { hash };
@@ -920,11 +906,39 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			new obsidian.Notice(`公開に失敗しました: ${e?.message ?? e}`);
 			return false;
 		} finally {
+			// エクスプローラー側のスピナー解除
 			this.uploadingPaths.delete(file.path);
 			this._reRenderExplorer();
+
+			// 【追加】成否に関わらず、最後にDiff画面を確実にリロード（リロードされるまでスピナーが維持されます）
+			this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_DIFF).forEach(leaf => {
+				if (leaf.view.filePath === file.path && typeof leaf.view.loadAndRender === 'function') {
+					void leaf.view.loadAndRender();
+				}
+			});
 		}
 	}
+	
+	async waitForPublishedContent(path, expectedHash) {
+		const inst = getPublishInstance(this.app);
+		if (!inst || !expectedHash) return false;
 
+		const timeoutMs = 15000; // 最大15秒
+		const intervalMs = 800;  // 0.8秒間隔
+		const startTime = Date.now();
+
+		while (Date.now() - startTime <= timeoutMs) {
+			await sleep(intervalMs);
+			const publishContent = await fetchPublishContent(inst, path, { cacheBust: true });
+			if (publishContent !== null && (await sha256Hex(publishContent)) === expectedHash) {
+				return true; // 一致したらループを抜ける
+			}
+		}
+
+		new obsidian.Notice('公開は完了しましたが、Publish 側への反映確認がタイムアウトしました');
+		return false;
+	}
+	
 	_reRenderExplorer() {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_EXPLORER)) {
 			leaf.view.render();
