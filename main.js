@@ -394,47 +394,10 @@ class PublishExplorerView extends obsidian.ItemView {
 			return;
 		}
 
-		const deletedEntries = [], modifiedEntries = [], cleanEntries = [];
-		for (const [path, status] of publishMap) {
-			const entry = { path, status };
-			if (status.letter === 'D') deletedEntries.push(entry);
-			else if (status.letter === 'M') modifiedEntries.push(entry);
-			else cleanEntries.push(entry);
-		}
+		const entries = Array.from(publishMap, ([path, status]) => ({ path, status }))
+			.sort((a, b) => a.path.localeCompare(b.path));
 
-		const sort = arr => arr.sort((a, b) => a.path.localeCompare(b.path));
-		sort(deletedEntries); sort(modifiedEntries); sort(cleanEntries);
-
-		if (deletedEntries.length > 0)
-			this.renderSection(content, `Publish のみ (D)   ${deletedEntries.length}`, deletedEntries);
-		if (modifiedEntries.length > 0)
-			this.renderSection(content, `変更あり (M)   ${modifiedEntries.length}`, modifiedEntries);
-		if (cleanEntries.length > 0)
-			this.renderSection(content, `変更なし   ${cleanEntries.length}`, cleanEntries, false);
-	}
-
-	renderSection(container, title, entries, startCollapsed = false) {
-		const section = container.createDiv({ cls: 'publish-explorer-section' });
-
-		const sectionHeader = section.createDiv({ cls: 'publish-explorer-section-header' });
-		const chevron = sectionHeader.createSpan({ cls: 'publish-explorer-chevron' });
-		obsidian.setIcon(chevron, startCollapsed ? 'chevron-right' : 'chevron-down');
-		sectionHeader.createSpan({ cls: 'publish-explorer-section-title', text: title });
-
-		const sectionContent = section.createDiv({ cls: 'publish-explorer-section-content' });
-		if (startCollapsed) sectionContent.addClass('is-collapsed');
-		this.renderTree(sectionContent, buildTree(entries), 0);
-
-		sectionHeader.addEventListener('click', () => {
-			const collapsed = sectionContent.hasClass('is-collapsed');
-			if (collapsed) {
-				sectionContent.removeClass('is-collapsed');
-				obsidian.setIcon(chevron, 'chevron-down');
-			} else {
-				sectionContent.addClass('is-collapsed');
-				obsidian.setIcon(chevron, 'chevron-right');
-			}
-		});
+		this.renderTree(content, buildTree(entries), 0);
 	}
 
 	renderTree(container, node, depth) {
