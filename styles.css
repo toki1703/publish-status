@@ -64,59 +64,73 @@
 	text-overflow: ellipsis;
 }
 
-.publish-diff-body {
+.publish-diff-split {
+	display: flex;
+	flex: 1;
+	overflow: hidden;
+	min-height: 0;
+}
+
+.publish-diff-pane {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	min-width: 0;
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+.publish-diff-pane:last-child {
+	border-right: none;
+}
+
+.publish-diff-pane-header {
+	padding: 3px 10px;
+	font-size: 11px;
+	font-weight: 600;
+	font-family: var(--font-interface);
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+	user-select: none;
+}
+
+.publish-diff-pane-content {
 	flex: 1;
 	overflow: auto;
 }
 
-.publish-diff-legend {
-	display: flex;
-	gap: 16px;
-	padding: 4px 12px;
-	font-size: 11px;
-	font-family: var(--font-interface);
-	background: var(--background-secondary);
-	border-bottom: 1px solid var(--background-modifier-border);
-	flex-shrink: 0;
-}
-
-.publish-diff-legend-item {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-}
-
-.publish-diff-table {
-	min-width: 100%;
-}
-
-.publish-diff-row {
+.publish-diff-side-row {
 	display: flex;
 	align-items: baseline;
 	min-height: 20px;
 	line-height: 20px;
 }
 
-.publish-diff-row:hover {
+.publish-diff-side-row:hover {
 	filter: brightness(1.08);
 }
 
-.publish-diff-row-delete {
+.publish-diff-side-row-delete {
 	background: var(--color-red-background, rgba(241, 76, 76, 0.15));
 }
 
-.publish-diff-row-insert {
+.publish-diff-side-row-insert {
 	background: var(--color-green-background, rgba(115, 201, 145, 0.15));
 }
 
-.publish-diff-row-equal {
+.publish-diff-side-row-equal {
 	background: transparent;
+}
+
+.publish-diff-side-row-blank {
+	background: var(--background-secondary-alt, rgba(128, 128, 128, 0.06));
 }
 
 .publish-diff-num {
 	min-width: 40px;
 	text-align: right;
-	padding: 0 8px;
+	padding: 0 6px;
 	color: var(--text-faint);
 	font-size: 11px;
 	user-select: none;
@@ -124,17 +138,7 @@
 	border-right: 1px solid var(--background-modifier-border);
 }
 
-.publish-diff-marker {
-	width: 20px;
-	text-align: center;
-	flex-shrink: 0;
-	user-select: none;
-}
-
-.publish-diff-row-delete .publish-diff-marker { color: #f14c4c; }
-.publish-diff-row-insert .publish-diff-marker { color: #73c991; }
-
-.publish-diff-text {
+.publish-diff-side-text {
 	flex: 1;
 	padding: 0 8px;
 	white-space: pre;
