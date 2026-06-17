@@ -109,27 +109,17 @@ function groupHunks(diff) {
 // ── Publish 版コンテンツ取得 ──────────────────────────────────
 
 async function fetchPublishContent(inst, path) {
-	// Strategy 1: inst の既知メソッドを試す
-	for (const name of ['getContent', 'getFileContent', 'readRemote', 'downloadFile', 'getMarkdown']) {
-		if (typeof inst[name] === 'function') {
-			try {
-				const r = await inst[name](path);
-				if (typeof r === 'string') return r;
-				if (r?.content && typeof r.content === 'string') return r.content;
-			} catch (_) { /* 次を試す */ }
-		}
-	}
+	const host = inst?.host;
+	const siteId = inst?.siteId;
+	if (!host || !siteId) return null;
 
-	// Strategy 2: Obsidian Publish CDN (uid が取れる場合)
-	const uid = inst?.options?.uid ?? inst?.data?.uid ?? inst?.publishSettings?.uid;
-	if (uid) {
-		try {
-			const res = await obsidian.requestUrl({
-				url: `https://publish.obsidian.md/access?vault=${uid}&path=${encodeURIComponent(path)}`,
-			});
-			if (res.status === 200) return res.text;
-		} catch (_) { /* 取得失敗 */ }
-	}
+	const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+	try {
+		const res = await obsidian.requestUrl({
+			url: `https://${host}/access/${siteId}/${encodedPath}`,
+		});
+		if (res.status === 200) return res.text;
+	} catch (_) { /* 取得失敗 */ }
 
 	return null;
 }
