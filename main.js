@@ -260,7 +260,7 @@ class PublishDiffView extends obsidian.ItemView {
 
 	async _contentHash(content) {
 		if (!content) return null;
-		const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(content));
+		const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
 		return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 7);
 	}
 
