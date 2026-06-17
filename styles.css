@@ -21,3 +21,150 @@
 .tree-item-inner.publish-status-added    { color: #73c991; }
 .tree-item-inner.publish-status-modified { color: #e2c08d; }
 .tree-item-inner.publish-status-deleted  { color: #f14c4c; }
+
+
+/* ── Publish Explorer パネル ── */
+
+.publish-explorer-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+}
+
+.publish-explorer-header {
+	display: flex;
+	align-items: center;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	gap: 4px;
+}
+
+.publish-explorer-title {
+	flex: 1;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	color: var(--text-muted);
+}
+
+.publish-explorer-refresh-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 2px 4px;
+	color: var(--text-muted);
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.publish-explorer-refresh-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.publish-explorer-content {
+	flex: 1;
+	overflow-y: auto;
+	padding: 4px 0;
+}
+
+.publish-explorer-empty {
+	padding: 16px;
+	color: var(--text-faint);
+	text-align: center;
+	font-size: 13px;
+}
+
+.publish-explorer-section {
+	margin-bottom: 2px;
+}
+
+.publish-explorer-section-header {
+	display: flex;
+	align-items: center;
+	padding: 3px 8px;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+	gap: 4px;
+	border-radius: 4px;
+	user-select: none;
+}
+
+.publish-explorer-section-header:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.publish-explorer-section-content.is-collapsed {
+	display: none;
+}
+
+.publish-explorer-folder-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	cursor: pointer;
+	border-radius: 4px;
+	font-size: 13px;
+	user-select: none;
+}
+
+.publish-explorer-folder-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.publish-explorer-folder-children.is-collapsed {
+	display: none;
+}
+
+.publish-explorer-folder-name {
+	color: var(--text-normal);
+}
+
+.publish-explorer-folder-icon {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
+
+.publish-explorer-file-row {
+	display: flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 13px;
+}
+
+.publish-explorer-file-row.is-clickable {
+	cursor: pointer;
+}
+
+.publish-explorer-file-row.is-clickable:hover {
+	background: var(--background-modifier-hover);
+}
+
+.publish-explorer-file-row.publish-explorer-deleted-file {
+	opacity: 0.85;
+}
+
+.publish-explorer-file-name {
+	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.publish-explorer-chevron {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
