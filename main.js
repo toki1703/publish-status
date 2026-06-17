@@ -797,10 +797,12 @@ class PublishStatusPlugin extends obsidian.Plugin {
 
 		this.addRibbonIcon('upload-cloud', 'Publish Explorer を開く', () => this.openPublishExplorer());
 
+		this.refreshDebounced = obsidian.debounce(() => this.refresh(), 3000, true);
+
 		this.app.workspace.onLayoutReady(async () => { await this.refresh(); });
 
-		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refresh()));
-		this.registerEvent(this.app.vault.on('modify', () => this.refresh()));
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshDebounced()));
+		this.registerEvent(this.app.vault.on('modify', () => this.refreshDebounced()));
 	}
 
 	onunload() {
