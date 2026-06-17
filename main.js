@@ -133,10 +133,13 @@ async function fetchPublishContent(inst, path, permalink = null) {
 		}
 	}
 
-	// permalink があればそちらを優先 (Publish の仕様に準拠)
-	const urlPath = permalink != null
+	// permalink があればそちらを優先。なければ .md を除いたパスを使う
+	const rawPath = permalink != null
 		? String(permalink).replace(/^\/+/, '')
-		: path;
+		: path.replace(/\.md$/, '');
+
+	// パスの各セグメントをエンコード (スペース等に対応)
+	const urlPath = rawPath.split('/').map(s => encodeURIComponent(s)).join('/');
 
 	// ベース URL からファイルコンテンツを取得
 	try {
