@@ -884,7 +884,7 @@ class PublishStatusPlugin extends obsidian.Plugin {
 			console.log('[PublishStatus] files:', Object.keys(this.state.files).length);
 			this.decorate();
 			for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_EXPLORER)) {
-				leaf.view.render();
+				if (typeof leaf.view.render === 'function') leaf.view.render();
 			}
 		} catch (e) {
 			console.error('[PublishStatus] scanForChanges failed', e);
@@ -1054,7 +1054,7 @@ class PublishStatusPlugin extends obsidian.Plugin {
 	
 	_reRenderExplorer() {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PUBLISH_EXPLORER)) {
-			leaf.view.render();
+			if (typeof leaf.view.render === 'function') leaf.view.render();
 		}
 	}
 
